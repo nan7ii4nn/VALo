@@ -804,11 +804,16 @@
         <div id="mobile-drawer-backdrop" onclick="closeMobileDrawer()"></div>
         <aside id="app-sidebar" class="flex flex-col overflow-y-auto bg-white border-r border-gray-200 p-4 md:p-6 gap-2 shrink-0">
             <div class="flex items-center justify-between md:block mb-1">
-                <div class="flex flex-col">
-                  <div class="flex items-center gap-2 font-bold tracking-wider text-[#351E1C]">
-                    <span class="px-2 py-0.5 rounded text-xs bg-[#FF6037] text-white font-mono font-bold">VALO</span>
-                  </div>
-                  <span class="text-[10px] font-mono tracking-widest text-[#351E1C]/60 uppercase mt-0.5">value + allocation</span>
+                <div class="flex items-center gap-2">
+                    <svg viewBox="0 0 200 200" class="w-7 h-7 flex-shrink-0" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M58,38 L100,152 L142,38" fill="none" stroke="#351E1C" stroke-width="34" stroke-linecap="round" stroke-linejoin="round" />
+                        <path d="M100,52 L100,112" fill="none" stroke="#FFFFFF" stroke-width="13" stroke-linecap="round" />
+                        <ellipse cx="100" cy="79" rx="15.5" ry="11.5" fill="#FF6037" />
+                    </svg>
+                    <div class="flex flex-col leading-none">
+                        <span class="text-lg font-black tracking-tight text-[#351E1C] lowercase">valo</span>
+                        <span class="text-[9px] font-mono font-bold tracking-widest text-[#733635] uppercase mt-1">value + allocation</span>
+                    </div>
                 </div>
                 <button type="button" id="mobile-drawer-close-btn" onclick="closeMobileDrawer()" class="mobile-hamburger-btn" aria-label="關閉選單">×</button>
             </div>
