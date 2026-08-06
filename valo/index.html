@@ -804,18 +804,11 @@
         <div id="mobile-drawer-backdrop" onclick="closeMobileDrawer()"></div>
         <aside id="app-sidebar" class="flex flex-col overflow-y-auto bg-white border-r border-gray-200 p-4 md:p-6 gap-2 shrink-0">
             <div class="flex items-center justify-between md:block mb-1">
-                <div class="flex items-center gap-2.5 font-bold tracking-wider text-[#351E1C]">
-                    <div class="w-8 h-8 flex items-center justify-center bg-[#351E1C] rounded-xl overflow-hidden p-1 shadow-sm">
-                        <!-- V 字圖標 SVG -->
-                        <svg viewBox="0 0 50 50" class="w-full h-full" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M10 5 C11 18, 16 32, 25 32 C34 32, 39 18, 40 5 L35 5 C34.2 14, 32 24, 25 24 C18 24, 15.8 14, 15 5 Z" fill="#F5F4ED"/>
-                            <circle cx="25" cy="27" r="4.5" fill="#FF6037"/>
-                        </svg>
-                    </div>
-                    <div class="flex flex-col">
-                        <span class="text-xs font-mono font-bold tracking-widest text-[#FF6037]">VALO</span>
-                        <span class="text-sm font-black tracking-tight">PORTFOLIO</span>
-                    </div>
+                <div class="flex flex-col">
+                  <div class="flex items-center gap-2 font-bold tracking-wider text-[#351E1C]">
+                    <span class="px-2 py-0.5 rounded text-xs bg-[#FF6037] text-white font-mono font-bold">VALO</span>
+                  </div>
+                  <span class="text-[10px] font-mono tracking-widest text-[#351E1C]/60 uppercase mt-0.5">value + allocation</span>
                 </div>
                 <button type="button" id="mobile-drawer-close-btn" onclick="closeMobileDrawer()" class="mobile-hamburger-btn" aria-label="關閉選單">×</button>
             </div>
@@ -4731,10 +4724,14 @@
             if (enriched.length >= 3) break; // 湊到 3 檔就停止，避免發出多餘的網路請求
         }
 
-        // 絕對回傳條款：低預算模式，或個股候選不足 3 檔時，自動從防守型 ETF 備援池補滿，
-        // 確保畫面永遠有安全、高流動性的標的可以選，不會出現「找不到符合條件標的」的空結果
+        // 絕對回傳條款（含小資零股例外）：一般情況下，低預算模式或個股候選不足 3 檔時，
+        // 會自動從防守型 ETF 備援池補滿，確保畫面永遠有安全、高流動性的標的可以選；
+        // 但「預算較低 + 已勾選允許零股」這個組合是小資族刻意要用零股佈局個股的情境，
+        // 這裡改成完全不強制補 ETF——個股篩到幾檔就顯示幾檔（哪怕只有 1、2 檔），
+        // 絕不自動把 ETF 塞進這份個股推薦清單裡，把選擇權完全交還給使用者。
+        const skipEtfFallback = isLowBudget && allowOddLot;
         let usedEtfFallback = false;
-        if (enriched.length < 3 && (isLowBudget || enriched.length === 0)) {
+        if (!skipEtfFallback && enriched.length < 3 && (isLowBudget || enriched.length === 0)) {
             const beforeCount = enriched.length;
             await fillWithDefensiveEtfs(enriched, budget, allowOddLot);
             usedEtfFallback = enriched.length > beforeCount;
@@ -4747,7 +4744,9 @@
                 ? `已依預算 NT$ ${fmtNum(budget)} 篩出 ${enriched.length} 檔候選標的（已自動納入高流動性防守型 ETF 補足名額）。`
                 : `已依預算 NT$ ${fmtNum(budget)} 篩出 ${enriched.length} 檔候選標的。`;
         } else {
-            statusEl.innerText = '目前連防守型 ETF 都買不起最小 1 股，預算可能過低，建議提高預算或稍後再試一次。';
+            statusEl.innerText = skipEtfFallback
+                ? '目前找不到符合條件的個股標的，預算可能過低，建議提高預算或稍後再試一次。'
+                : '目前連防守型 ETF 都買不起最小 1 股，預算可能過低，建議提高預算或稍後再試一次。';
         }
     }
 
