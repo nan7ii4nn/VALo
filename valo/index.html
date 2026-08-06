@@ -532,7 +532,7 @@
            直到 Firebase 判斷出登入狀態後才會被 JS 加上 .hidden 隱藏掉 ---- */
         #loading-overlay {
             position: fixed; inset: 0; z-index: 9999;
-            display: flex; align-items: center; justify-content: center;
+            display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px;
             background-color: var(--c-bg);
         }
         #loading-overlay.hidden { display: none; }
@@ -547,6 +547,59 @@
             border: 2px solid rgba(115, 54, 53, 0.22);
             border-top-color: var(--c-accent);
             animation: spin 0.8s linear infinite;
+        }
+
+        /* ---- 驗證中畫面的 VALO 動態 Logo：V 字圖標淡入 + 發光脈動 + 周圍浮動光子，
+           手機與電腦共用同一個 #loading-overlay，這裡改一次兩邊都會套用 ---- */
+        .loading-logo-stage {
+            position: relative;
+            width: 108px; height: 108px;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .loading-logo-svg {
+            position: relative; z-index: 2;
+            width: 68px; height: 68px;
+            opacity: 0;
+            animation:
+                loadingLogoFadeIn 1s cubic-bezier(.34,1.56,.64,1) forwards,
+                loadingLogoGlow 2.4s ease-in-out infinite 1s;
+        }
+        @keyframes loadingLogoFadeIn {
+            0%   { opacity: 0; transform: scale(0.7) translateY(10px); }
+            60%  { opacity: 1; transform: scale(1.07) translateY(0); }
+            100% { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        @keyframes loadingLogoGlow {
+            0%, 100% { filter: drop-shadow(0 0 6px rgba(255,96,55,.35)) drop-shadow(0 0 2px rgba(53,30,28,.12)); }
+            50%      { filter: drop-shadow(0 0 20px rgba(255,96,55,.85)) drop-shadow(0 0 4px rgba(53,30,28,.18)); }
+        }
+        .loading-logo-particle {
+            position: absolute; width: 5px; height: 5px; border-radius: 999px;
+            background: var(--c-accent);
+            box-shadow: 0 0 6px rgba(255,96,55,.85), 0 0 2px rgba(255,96,55,1);
+            opacity: 0;
+            animation: loadingParticleFloat 3s ease-in-out infinite;
+        }
+        .loading-logo-particle.p1 { top: 4%;  left: 48%; animation-delay: .15s; }
+        .loading-logo-particle.p2 { top: 22%; left: 88%; animation-delay: .55s; }
+        .loading-logo-particle.p3 { top: 62%; left: 92%; animation-delay: .95s; }
+        .loading-logo-particle.p4 { top: 90%; left: 52%; animation-delay: 1.35s; }
+        .loading-logo-particle.p5 { top: 66%; left: 6%;  animation-delay: 1.75s; }
+        .loading-logo-particle.p6 { top: 20%; left: 4%;  animation-delay: 2.15s; }
+        @keyframes loadingParticleFloat {
+            0%   { opacity: 0; transform: scale(.4) translate(0, 4px); }
+            18%  { opacity: 1; }
+            50%  { opacity: .85; transform: scale(1.15) translate(0, -6px); }
+            82%  { opacity: .25; }
+            100% { opacity: 0; transform: scale(.5) translate(0, -10px); }
+        }
+        .loading-logo-word {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 20px; font-weight: 900; letter-spacing: .01em;
+            color: var(--c-dark);
+            opacity: 0;
+            animation: loadingLogoFadeIn 1s cubic-bezier(.34,1.56,.64,1) forwards;
+            animation-delay: .12s;
         }
 
         .login-screen {
@@ -742,12 +795,13 @@
         .mobile-nav-icon { font-size: 15px; line-height: 1; font-weight: 900; }
         .mobile-nav-label { font-size: 10px; font-weight: 800; letter-spacing: .02em; }
 
-        /* 手機版頂部漢堡按鈕：開啟側邊欄抽屜，可存取「持股管理／短線交易／股利日曆」等次要頁籤 */
+        /* 手機版頂部漢堡按鈕：開啟側邊欄抽屜，可存取「持股管理／短線交易／股利日曆」等次要頁籤；
+           不套底色圓圈，直接顯示較大圖示、緊貼在 Logo 旁邊，維持 40x40 觸控熱區但視覺上更輕量 */
         .mobile-hamburger-btn {
             display: flex; align-items: center; justify-content: center;
-            width: 36px; height: 36px; border-radius: 999px;
-            background: var(--c-card-alt); border: 1px solid var(--c-line);
-            font-weight: 900; font-size: 13px; color: var(--c-dark); cursor: pointer;
+            width: 40px; height: 40px;
+            background: transparent; border: none;
+            font-weight: 900; font-size: 22px; line-height: 1; color: var(--c-dark); cursor: pointer;
         }
         @media (min-width: 768px) { .mobile-hamburger-btn { display: none; } }
 
@@ -763,6 +817,20 @@
     <!-- ============ 驗證中過渡遮罩：頁面剛載入、Firebase 還沒判斷出登入狀態前，只會看到這個畫面，
          絕對不會有「舊資料先閃一下」或「登入畫面先閃一下才變成儀表板」的狀況（Flash of Unauthenticated Content） ============ -->
     <div id="loading-overlay">
+        <div class="loading-logo-stage">
+            <span class="loading-logo-particle p1"></span>
+            <span class="loading-logo-particle p2"></span>
+            <span class="loading-logo-particle p3"></span>
+            <span class="loading-logo-particle p4"></span>
+            <span class="loading-logo-particle p5"></span>
+            <span class="loading-logo-particle p6"></span>
+            <svg viewBox="0 0 200 200" class="loading-logo-svg" xmlns="http://www.w3.org/2000/svg">
+                <path d="M58,38 L100,152 L142,38" fill="none" stroke="#351E1C" stroke-width="34" stroke-linecap="round" stroke-linejoin="round" />
+                <path d="M100,52 L100,112" fill="none" stroke="#F5F4ED" stroke-width="13" stroke-linecap="round" />
+                <ellipse cx="100" cy="79" rx="15.5" ry="11.5" fill="#FF6037" />
+            </svg>
+        </div>
+        <span class="loading-logo-word">valo</span>
         <span class="loading-overlay-text"><span class="loading-overlay-spinner"></span>驗證中...（正在檢查免責聲明狀態）</span>
     </div>
 
@@ -1633,6 +1701,16 @@
             if (IS_FILE_PROTOCOL) {
                 fbAuth.setPersistence(firebase.auth.Auth.Persistence.NONE).catch(() => {});
                 showFileProtocolNotice();
+            } else {
+                // PWA／一般瀏覽器模式：明確指定 LOCAL（IndexedDB）持久化，不依賴 SDK 的隱性預設值。
+                // 加到主畫面的 PWA 是獨立的瀏覽情境，如果沒有明確指定，某些瀏覽器（尤其 iOS Safari
+                // 的 Standalone 模式）在特定情況下可能無法正確延續登入狀態，導致每次重新開啟 App
+                // 都要重新登入、雲端設定（含 OpenRouter API 金鑰、記憶庫）也讀不回來。這裡明確設定
+                // LOCAL，若環境限制 IndexedDB（例如部分隱私瀏覽模式）則退回 SESSION，至少同一次
+                // 瀏覽期間不會無故被登出。
+                fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {
+                    fbAuth.setPersistence(firebase.auth.Auth.Persistence.SESSION).catch(() => {});
+                });
             }
 
             fbAuth.onAuthStateChanged(handleAuthStateChanged);
@@ -4642,19 +4720,22 @@
         return null;
     }
 
-    // 小資防衛機制：預算低於這個門檻時，自動放寬流動性門檻，並優先開放高流動性 ETF 零股組合，
-    // 確保低預算也一定選得出東西，不會因為門檻卡太嚴而回傳空結果
+    // 小資防衛機制：預算低於這個門檻時，自動放寬流動性門檻，確保低預算也一定選得出東西，
+    // 不會因為門檻卡太嚴而回傳空結果
     const LOW_BUDGET_THRESHOLD = 30000;
-    // 精選幾檔台股規模最大、日成交量最穩定、追蹤誤差低的市值型／高股息 ETF 當防守型備援池：
-    // 這些 ETF 分散度高、流動性極佳、幾乎沒有「倒閉風險」，特別適合小額預算做零股佈局，
-    // 也是「絕對回傳條款」的最後保底——只要預算買得起至少 1 股，這裡永遠有東西可以推薦
-    const DEFENSIVE_ETF_POOL = ['0050', '0056', '00878', '00919'];
 
-    // AI 雙防護選股（模式 B，台股實務版四大篩選）：
+    // AI 雙防護選股（模式 B，台股實務版四大篩選 + 個股／ETF 公平評比）：
     // 全市場財務／收盤資料本來就是「一次抓全部公司」的格式（companyMap／stockDayAllMap／
     // 月營收／季損益／資產負債表都是單一 API 呼叫回傳整個市場），所以前 3 道篩選可以很快掃完全市場；
-    // 只有第 4 道「流動性/動能」需要逐檔另外抓近期日成交資料，所以只對前 3 道篩完、財務體質排名
-    // 較前面的一小批候選做，避免發出過多網路請求。
+    // 第 4 道「流動性/動能」需要逐檔另外抓近期日成交資料，改用 Promise.all 平行處理個股候選池
+    // 與 ETF 候選池，不再依序 await，大幅縮短等待時間，也讓候選池能涵蓋更多標的。
+    //
+    // 篩選標準整體放寬（原本太容易「找不到標的」）：負債比門檻 60% → 70%，流動性門檻依預算
+    // 級距下修，個股候選池從前 15 檔擴大到前 20 檔一起做流動性檢查。
+    //
+    // 個股與 ETF 不再是「個股優先、ETF 只在找不到時補位」的關係，而是從一開始就用同一套
+    // 「流動性 + 適配度」複合分數放在同一個池子裡公平評比，最後分數最高的 3 檔（不管是個股
+    // 還是 ETF）就是最終顯示的候選標的，交由市場數據本身決定組合，不預設偏好某一種類型。
     async function runBudgetScreener(budget, allowOddLot) {
         if (!Object.keys(stockDayAllMap).length) await loadStockDayAll().catch(() => {});
         if (!Object.keys(companyMap).length) await loadCompanyMap().catch(() => {});
@@ -4665,14 +4746,16 @@
         ]);
 
         const isLowBudget = budget < LOW_BUDGET_THRESHOLD;
-        // 篩選④門檻：一般情況要求近 5 日日均成交金額 > NT$ 1 億元或日均量 > 2,000 張；
-        // 低預算模式放寬到 > NT$ 2,000 萬元或日均量 > 1,000 張，大幅擴充可選標的池
-        const liquidityTurnoverMin = isLowBudget ? 20000000 : 100000000;
-        const liquidityVolumeMin = isLowBudget ? 1000 : 2000;
+        // 篩選④門檻放寬：一般情況要求近 5 日日均成交金額 > NT$ 5,000 萬元或日均量 > 1,000 張
+        // （原本是 1 億元 / 2,000 張，太容易篩不到東西）；低預算模式再放寬到 > NT$ 1,000 萬元
+        // 或日均量 > 500 張
+        const liquidityTurnoverMin = isLowBudget ? 10000000 : 50000000;
+        const liquidityVolumeMin = isLowBudget ? 500 : 1000;
 
-        const candidates = [];
+        // ---- 個股候選池（篩選①②③：預算可負擔、財務風險、獲利能力） ----
+        const stockCandidates = [];
         Object.keys(companyMap).forEach(code => {
-            if (isETF(code)) return; // 個股篩選邏輯這裡先不處理 ETF，ETF 另外走 DEFENSIVE_ETF_POOL 備援池
+            if (isETF(code)) return; // ETF 另外走下面的 ETF 候選池，最後合併公平評比
             const eod = stockDayAllMap[code];
             if (!eod || !eod.close || eod.close < 10) return; // 沒有最新報價、或股價過低（用低股價當「全額交割股」的替代排除指標）就先排除
 
@@ -4685,11 +4768,12 @@
             const fin = buildFinancialSnapshot(revMap[code], incMap[code], balMap[code]);
             if (!fin.available) return;
 
-            // 篩選②：低倒閉與財務風險。一般產業要求負債比 < 60%；金融保險業經營模式本來就是高槓桿，
-            // 不適用一般產業的負債比門檻，這裡直接跳過負債比檢查（目前資料來源沒有資本適足率／清償能力
-            // 這類金融監理指標，所以不假裝做金融特化的財務健檢，只是不誤殺體質正常的金控/保險股）。
+            // 篩選②：低倒閉與財務風險。一般產業要求負債比 < 70%（原本 60% 太嚴格）；金融保險業
+            // 經營模式本來就是高槓桿，不適用一般產業的負債比門檻，這裡直接跳過負債比檢查
+            // （目前資料來源沒有資本適足率／清償能力這類金融監理指標，所以不假裝做金融特化的
+            // 財務健檢，只是不誤殺體質正常的金控/保險股）。
             if (!isFinance) {
-                if (fin.debtRatioPct === null || fin.debtRatioPct >= 60) return;
+                if (fin.debtRatioPct === null || fin.debtRatioPct >= 70) return;
             }
             // 目前資料來源不含現金流量表，暫以「營業利益率是否為正」做「營業現金流為正」的替代指標，
             // 一般產業與金融業都適用（不受高槓桿經營模式影響）。
@@ -4699,21 +4783,37 @@
             // 避免誤刪鴻海、廣達這類 EMS 代工龍頭（本業毛利率天生偏低，但營收與淨利規模真實龐大）。
             if (fin.eps === null || fin.eps <= 0) return;
 
-            candidates.push({ code, eod, fin, industry, isFinance, sizing, unitCost: sizing.cost, unitCostPct: (sizing.cost / budget) * 100 });
+            stockCandidates.push({ code, eod, fin, industry, isFinance, sizing, unitCost: sizing.cost, unitCostPct: (sizing.cost / budget) * 100, isEtf: false });
         });
 
-        // 排序邏輯改成「EPS 越高（真實獲利規模）優先、負債比越低（財務體質）優先」的複合分數，
-        // 不再依賴毛利率（因為篩選③已經不把毛利率當硬門檻，繼續拿來排序會不合理地把低毛利龍頭排到後面）
-        candidates.sort((a, b) => {
+        // 初步排序（決定要不要進入流動性檢查的候選池，還不是最終顯示順序）：
+        // 「EPS 越高（真實獲利規模）優先、負債比越低（財務體質）優先」的複合分數
+        stockCandidates.sort((a, b) => {
             const scoreA = (a.fin.eps || 0) * 2 - (a.isFinance ? 0 : (a.fin.debtRatioPct || 30)) * 0.1;
             const scoreB = (b.fin.eps || 0) * 2 - (b.isFinance ? 0 : (b.fin.debtRatioPct || 30)) * 0.1;
             return scoreB - scoreA;
         });
-        const shortlist = candidates.slice(0, 15);
+        const stockShortlist = stockCandidates.slice(0, 20); // 15 → 20，擴大候選池，降低篩不到標的的機率
 
-        const enriched = [];
-        for (const c of shortlist) {
-            const rows = await fetchStockDailyRange(c.code, 40);
+        // ---- ETF 候選池：常見市值型／高股息／海外科技／債券 ETF（見 ETF_NAMES），
+        // 一開始就跟個股放在同一輪流動性檢查裡，不是「個股不夠才補位」的備援池 ----
+        const etfShortlist = Object.keys(ETF_NAMES).map(code => {
+            const eod = stockDayAllMap[code];
+            if (!eod || !eod.close) return null;
+            const sizing = calcAffordableShares(eod.close, budget, allowOddLot);
+            if (!sizing) return null;
+            return {
+                code, eod, sizing, unitCost: sizing.cost, unitCostPct: (sizing.cost / budget) * 100,
+                industry: 'ETF', isFinance: false, isEtf: true,
+                fin: { eps: null, debtRatioPct: null, grossMarginPct: null, operatingMarginPct: null, available: false }
+            };
+        }).filter(Boolean);
+
+        // ---- 篩選④：流動性檢查，個股與 ETF 用同一套邏輯與門檻，改成 Promise.all 平行抓取，
+        // 不再逐檔 await、湊到 3 檔就提早跳出——完整評估過候選池後才決定最終名單，
+        // 才能真正做到「個股與 ETF 公平評比」而不是先搶先贏 ----
+        const enrichedResults = await Promise.all([...stockShortlist, ...etfShortlist].map(async (c) => {
+            const rows = await fetchStockDailyRange(c.code, 40).catch(() => []);
             const tech = computeTechnicalSnapshot(rows, c.eod.close);
             const recentRows = rows.slice(-5);
             const avgVolumeLots = recentRows.length
@@ -4722,79 +4822,32 @@
             const avgTurnoverValue = recentRows.length
                 ? recentRows.reduce((sum, r) => sum + (parseInt(String(r[2]).replace(/,/g, ''), 10) || 0), 0) / recentRows.length
                 : 0;
-            // 篩選④：高流動性與短線動能，門檻依預算高低動態調整（見上方 liquidityTurnoverMin/liquidityVolumeMin）
             const liquidityOk = avgTurnoverValue > liquidityTurnoverMin || avgVolumeLots > liquidityVolumeMin;
-            if (!liquidityOk) continue;
-            enriched.push({ ...c, tech, avgVolumeLots, avgTurnoverValue });
-            if (enriched.length >= 3) break; // 湊到 3 檔就停止，避免發出多餘的網路請求
-        }
+            if (!liquidityOk) return null;
+            return { ...c, tech, avgVolumeLots, avgTurnoverValue };
+        }));
+        const enriched = enrichedResults.filter(Boolean);
 
-        // 絕對回傳條款（含小資零股例外）：一般情況下，低預算模式或個股候選不足 3 檔時，
-        // 會自動從防守型 ETF 備援池補滿，確保畫面永遠有安全、高流動性的標的可以選；
-        // 但「預算較低 + 已勾選允許零股」這個組合是小資族刻意要用零股佈局個股的情境，
-        // 這裡改成完全不強制補 ETF——個股篩到幾檔就顯示幾檔（哪怕只有 1、2 檔），
-        // 絕不自動把 ETF 塞進這份個股推薦清單裡，把選擇權完全交還給使用者。
-        const skipEtfFallback = isLowBudget && allowOddLot;
-        let usedEtfFallback = false;
-        if (!skipEtfFallback && enriched.length < 3 && (isLowBudget || enriched.length === 0)) {
-            const beforeCount = enriched.length;
-            await fillWithDefensiveEtfs(enriched, budget, allowOddLot);
-            usedEtfFallback = enriched.length > beforeCount;
-        }
+        // ---- 合併評分：個股與 ETF 用同一套「流動性（取對數壓縮量級差距，避免大型股一路
+        // 碾壓中小型股）+ 品質分數」複合分數公平排序，分數最高的 3 檔就是最終顯示名單，
+        // 不再預設個股優先或 ETF 優先，讓市場數據本身決定這次要推薦什麼組合 ----
+        enriched.forEach(c => {
+            const liquidityScore = Math.log10(Math.max(c.avgTurnoverValue, 1));
+            const qualityScore = c.isEtf ? 2.4 : ((c.fin.eps || 0) * 0.3 - (c.isFinance ? 0 : (c.fin.debtRatioPct || 30)) * 0.02);
+            c.suitabilityScore = liquidityScore + qualityScore;
+        });
+        enriched.sort((a, b) => b.suitabilityScore - a.suitabilityScore);
+        const finalList = enriched.slice(0, 3);
 
-        renderScreenerCards(enriched, budget, isLowBudget && allowOddLot);
+        renderScreenerCards(finalList, budget, isLowBudget && allowOddLot);
         const statusEl = document.getElementById('st-status-note');
-        if (enriched.length) {
-            statusEl.innerText = usedEtfFallback
-                ? `已依預算 NT$ ${fmtNum(budget)} 篩出 ${enriched.length} 檔候選標的（已自動納入高流動性防守型 ETF 補足名額）。`
-                : `已依預算 NT$ ${fmtNum(budget)} 篩出 ${enriched.length} 檔候選標的。`;
+        if (finalList.length) {
+            const etfCount = finalList.filter(c => c.isEtf).length;
+            statusEl.innerText = etfCount
+                ? `已依預算 NT$ ${fmtNum(budget)} 綜合評估個股與 ETF，篩出 ${finalList.length} 檔最適合的候選標的（含 ${etfCount} 檔 ETF）。`
+                : `已依預算 NT$ ${fmtNum(budget)} 篩出 ${finalList.length} 檔候選標的。`;
         } else {
-            statusEl.innerText = skipEtfFallback
-                ? '目前找不到符合條件的個股標的，預算可能過低，建議提高預算或稍後再試一次。'
-                : '目前連防守型 ETF 都買不起最小 1 股，預算可能過低，建議提高預算或稍後再試一次。';
-        }
-    }
-
-    // 絕對回傳條款的保底邏輯：從 DEFENSIVE_ETF_POOL 依序試算可負擔股數（含零股），
-    // 補進 enriched 陣列直到湊滿 3 檔或池子用完為止。ETF 不套用個股的財務/EPS 篩選（不適用），
-    // 只要買得起、流動性資料抓得到，就視為安全的小資防守配置。
-    async function fillWithDefensiveEtfs(enriched, budget, allowOddLot) {
-        const already = new Set(enriched.map(c => c.code));
-        for (const code of DEFENSIVE_ETF_POOL) {
-            if (enriched.length >= 3) break;
-            if (already.has(code)) continue;
-
-            let eod = stockDayAllMap[code];
-            if (!eod || !eod.close) {
-                const seedRows = await fetchStockDailyRange(code, 10).catch(() => []);
-                if (seedRows.length) {
-                    const last = seedRows[seedRows.length - 1];
-                    const close = parseFloat(String(last[6]).replace(/,/g, ''));
-                    if (!isNaN(close)) eod = { close };
-                }
-            }
-            if (!eod || !eod.close) continue;
-
-            // 允許零股時才可能買到高價 ETF 的零股；沒勾選零股的話，ETF 一樣要湊得起一張才會入選
-            const sizing = calcAffordableShares(eod.close, budget, allowOddLot);
-            if (!sizing) continue;
-
-            const rows = await fetchStockDailyRange(code, 40).catch(() => []);
-            const tech = computeTechnicalSnapshot(rows, eod.close);
-            const recentRows = rows.slice(-5);
-            const avgVolumeLots = recentRows.length
-                ? (recentRows.reduce((sum, r) => sum + (parseInt(String(r[1]).replace(/,/g, ''), 10) || 0), 0) / recentRows.length) / 1000
-                : 0;
-            const avgTurnoverValue = recentRows.length
-                ? recentRows.reduce((sum, r) => sum + (parseInt(String(r[2]).replace(/,/g, ''), 10) || 0), 0) / recentRows.length
-                : 0;
-
-            enriched.push({
-                code, eod, sizing, unitCost: sizing.cost, unitCostPct: (sizing.cost / budget) * 100,
-                industry: classifyIndustry(code), isFinance: false, isEtf: true,
-                fin: { eps: null, debtRatioPct: null, grossMarginPct: null, operatingMarginPct: null, available: false },
-                tech, avgVolumeLots, avgTurnoverValue
-            });
+            statusEl.innerText = '目前找不到符合條件的候選標的，建議提高預算或稍後再試一次。';
         }
     }
 
@@ -4838,6 +4891,10 @@
                 <p class="text-xs text-gray-600" style="line-height:1.6;">${escapeHtml(overviewLine)}</p>
                 ${(!c.isEtf && eventWindow.length) ? `<p class="text-xs font-bold" style="color:var(--c-accent);">[事件預警] ${escapeHtml(eventWindow[0])}</p>` : ''}
                 <button type="button" onclick="loadShortTermCandidateFromScreener('${c.code}', ${c.sizing.shares}, ${c.eod.close})" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold py-2.5 rounded-lg transition">帶入此標的繪製投影連線</button>
+                <div class="grid grid-cols-2 gap-2">
+                    <button type="button" onclick="addScreenerCandidateToWatchlist('${c.code}')" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold py-2.5 rounded-lg transition">加入觀望</button>
+                    <button type="button" onclick="goToWatchlistTab('${c.code}')" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold py-2.5 rounded-lg transition">切換至觀望清單</button>
+                </div>
             </div>`;
         }).join('');
         // 每次重新渲染卡片列表（全新一輪模式 B 篩選）都是全新的 DOM，之前點選的「當前檢視中」
@@ -4872,6 +4929,36 @@
         markSelectedScreenerCard(code);
         switchTab('shortterm');
         runShortTermEngine(price);
+    }
+
+    // [加入觀望]：點擊短線篩選卡片上的這顆按鈕，直接把該標的加進觀望清單，不用再手動輸入代號；
+    // 已經持有、或已經在觀望清單裡的話，就不重複加入，直接視為完成。
+    async function addScreenerCandidateToWatchlist(code) {
+        if (appData.stocks.some(s => s.symbol === code) || appData.watchlist.some(s => s.symbol === code)) {
+            return;
+        }
+        const name = getCompanyName(code);
+        const eod = stockDayAllMap[code];
+        const watchItem = {
+            symbol: code, name,
+            price: eod && !isNaN(eod.close) ? eod.close : 0,
+            priceSource: eod ? 'eod' : null,
+            isWatch: true
+        };
+        appData.watchlist.unshift(watchItem);
+        persistHoldings();
+        renderWatchlist();
+        await refreshStockPrice(watchItem);
+        persistHoldings();
+        renderWatchlist();
+        refreshIndustryInBackground(watchItem.symbol);
+    }
+
+    // [切換至觀望清單]：直接跳到「持股管理與記憶庫」頁籤（觀望清單所在位置），
+    // 如果這檔標的已經在持股或觀望清單裡，順便自動選取、展開下方診斷面板
+    function goToWatchlistTab(code) {
+        switchTab('manage');
+        selectStock(code);
     }
 
     /* ========================================================================
