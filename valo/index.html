@@ -1092,7 +1092,7 @@
                                     <button type="button" onclick="document.getElementById('ocr-image-input').click()" class="text-xs font-black bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-full transition whitespace-nowrap">上傳截圖</button>
                                     <input type="file" id="ocr-image-input" accept="image/*" class="hidden" onchange="handleOcrImageSelect(this)">
                                 </div>
-                                <p class="text-[11px] text-gray-400">上傳券商 App 庫存畫面或對帳單截圖，或直接在這個頁面按 Ctrl+V 貼上；AI 辨識出的股票代號、股數、成本會列在下方，可自行修正後再一鍵批次匯入（僅新增持股紀錄，不會扣款，如需同步登記現金異動請自行於上方現金功能調整）。</p>
+                                <p class="text-[11px] text-gray-400">上傳券商 App 庫存畫面或對帳單截圖，或直接在這個頁面按 Ctrl+V 貼上；AI 辨識出的股票代號、股數、成本會列在下方，可自行修正後再一鍵批次匯入（僅新增持股紀錄，不會扣款，如需同步登記現金異動請自行於上方現金功能調整）。使用 OpenRouter 免費模型路由器辨識，完全不收費。</p>
                                 <div id="ocr-preview-wrap" class="hidden">
                                     <img id="ocr-preview-img" class="max-h-40 rounded-lg border border-gray-200" alt="OCR 截圖預覽">
                                 </div>
@@ -6965,7 +6965,7 @@
     }
 
     /* ========================================================================
-       截圖 OCR 智慧辨識匯入：上傳／貼上券商庫存或對帳單截圖，呼叫 OpenRouter 免費視覺模型
+       截圖 OCR 智慧辨識匯入：上傳／貼上券商庫存或對帳單截圖，呼叫 OpenRouter 視覺模型
        解析出「股票代號／持有股數／買進成本」，列成可編輯的確認清單，使用者核對無誤後
        一鍵批次匯入 appData.stocks（純粹回填既有持股紀錄，不扣現金——這些部位通常是使用者
        在開始用這個 App 之前就已經買進的，不是今天才發生的交易，跟 addStockItem() 的
@@ -7026,8 +7026,14 @@
         if (isError) el.style.color = 'var(--c-accent)'; else el.style.color = '';
     }
 
-    // 呼叫 OpenRouter 視覺模型辨識截圖：嚴格要求只回傳 JSON 陣列（代號／股數／成本），
-    // 用免費視覺模型當主力，被限流或出錯時依序自動改用備援模型，跟其他頁面的 AI 呼叫風格一致
+    // 呼叫 OpenRouter 視覺模型辨識截圖，嚴格要求只回傳 JSON 陣列（代號／股數／成本）。
+    // 模型固定使用 OpenRouter 官方的「Free Models Router」（model: 'openrouter/free'）：
+    // 這不是某一個特定模型的別名，而是 OpenRouter 官方維運的路由器，會即時從當下所有
+    // 「還在線上、確實支援圖片輸入」的免費模型裡自動挑一個來處理這個請求，完全免費、
+    // 不會扣款。比起我們自己在程式碼裡寫死某個 :free 模型名稱穩定得多——那些免費模型
+    // 常常被供應商說下架就下架，才會一直遇到 404 No endpoints found；交給官方路由器
+    // 動態選擇，就不會再因為我們寫死的名稱過期而打不通。
+    const OCR_VISION_MODEL = 'openrouter/free';
     async function runOcrRecognition(dataUrl) {
         const apiKey = getOpenRouterApiKey();
         if (!apiKey) {
@@ -7059,11 +7065,8 @@
                     'Authorization': `Bearer ${apiKey}`
                 },
                 body: JSON.stringify({
-                    model: 'google/gemini-2.0-flash-exp:free',
-                    // 主模型被限流／出錯時，依序自動改用下面這些免費視覺模型當備援
-                    models: ['meta-llama/llama-3.2-11b-vision-instruct:free', 'qwen/qwen2.5-vl-32b-instruct:free'],
+                    model: OCR_VISION_MODEL,
                     max_tokens: 1500,
-                    reasoning: { exclude: true },
                     messages: [
                         { role: 'system', content: systemPrompt },
                         {
@@ -7084,7 +7087,7 @@
                     const parsed = JSON.parse(errText);
                     msg = (parsed && parsed.error && parsed.error.message) || errText;
                 } catch (e) {}
-                const rateLimitHint = res.status === 429 ? '（免費模型當下被排隊的人太多，過一陣子再試一次）' : '';
+                const rateLimitHint = res.status === 429 ? '（免費額度目前被排隊的人太多，過一陣子再試一次）' : '';
                 setOcrStatus(`辨識失敗（HTTP ${res.status}）${msg ? '：' + msg.slice(0, 200) : ''}${rateLimitHint}`, true);
                 return;
             }
@@ -7099,7 +7102,8 @@
             }
             ocrParsedResults = list;
             renderOcrResults();
-            setOcrStatus(`辨識完成，找到 ${list.length} 筆持股，請核對修正後再匯入。`, false);
+            const usedModel = (data && data.model) ? `（本次由免費模型 ${data.model} 辨識）` : '';
+            setOcrStatus(`辨識完成，找到 ${list.length} 筆持股，請核對修正後再匯入。${usedModel}`, false);
         } catch (e) {
             const raw = e && e.message ? e.message : String(e);
             setOcrStatus(`AI 辨識呼叫失敗：${raw}（請確認裝置有連上網路，且沒有攔截外掛擋住 openrouter.ai）`, true);
