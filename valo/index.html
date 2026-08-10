@@ -1084,6 +1084,24 @@
                         <!-- 持股管理列表與新增 -->
                         <div class="card-white p-8 rounded-3xl space-y-4">
                             <h3 class="text-xs font-bold tracking-widest text-gray-400 uppercase">PORTFOLIO MANAGEMENT // 持股新增管理</h3>
+
+                            <!-- 截圖 OCR 智慧辨識匯入：上傳或貼上券商庫存／對帳單截圖，AI 視覺模型自動辨識代號／股數／成本 -->
+                            <div class="border border-dashed border-gray-300 rounded-xl p-4 space-y-2" id="ocr-drop-zone">
+                                <div class="flex items-center justify-between gap-2 flex-wrap">
+                                    <p class="text-xs font-bold text-gray-600">截圖 OCR 智慧辨識匯入</p>
+                                    <button type="button" onclick="document.getElementById('ocr-image-input').click()" class="text-xs font-black bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-full transition whitespace-nowrap">上傳截圖</button>
+                                    <input type="file" id="ocr-image-input" accept="image/*" class="hidden" onchange="handleOcrImageSelect(this)">
+                                </div>
+                                <p class="text-[11px] text-gray-400">上傳券商 App 庫存畫面或對帳單截圖，或直接在這個頁面按 Ctrl+V 貼上；AI 辨識出的股票代號、股數、成本會列在下方，可自行修正後再一鍵批次匯入（僅新增持股紀錄，不會扣款，如需同步登記現金異動請自行於上方現金功能調整）。</p>
+                                <div id="ocr-preview-wrap" class="hidden">
+                                    <img id="ocr-preview-img" class="max-h-40 rounded-lg border border-gray-200" alt="OCR 截圖預覽">
+                                </div>
+                                <p id="ocr-status-note" class="text-xs text-gray-500"></p>
+                                <div id="ocr-result-list" class="space-y-2"></div>
+                                <button type="button" id="ocr-import-btn" onclick="confirmImportOcrResults()" class="hidden w-full bg-black text-white font-black py-3 rounded-xl uppercase tracking-wider hover:bg-gray-800 transition text-sm">確認無誤，批次匯入這些持股</button>
+                            </div>
+
+                            <p class="text-[11px] text-gray-400 uppercase tracking-widest font-bold">— 或手動輸入 —</p>
                             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <input id="in-symbol" type="text" placeholder="股票代號 (如 2330)" class="bg-gray-50 border border-gray-200 p-4 rounded-xl text-sm text-gray-900 focus:outline-none focus:border-black">
                                 <input id="in-shares" type="number" placeholder="持有股數" class="bg-gray-50 border border-gray-200 p-4 rounded-xl text-sm text-gray-900 focus:outline-none focus:border-black">
@@ -6944,6 +6962,265 @@
         renderUI();
         refreshIndustryInBackground(newStock.symbol); // 背景向官方確認產業分類，抓到就無縫更新圓餅圖
         triggerGlobalRefresh(false);
+    }
+
+    /* ========================================================================
+       截圖 OCR 智慧辨識匯入：上傳／貼上券商庫存或對帳單截圖，呼叫 OpenRouter 免費視覺模型
+       解析出「股票代號／持有股數／買進成本」，列成可編輯的確認清單，使用者核對無誤後
+       一鍵批次匯入 appData.stocks（純粹回填既有持股紀錄，不扣現金——這些部位通常是使用者
+       在開始用這個 App 之前就已經買進的，不是今天才發生的交易，跟 addStockItem() 的
+       「今天買入、自動扣款」語意不同）。
+    ======================================================================== */
+    let ocrParsedResults = []; // 目前這一輪辨識出來、等待使用者確認匯入的候選清單
+
+    // 點擊「上傳截圖」選好檔案後觸發
+    function handleOcrImageSelect(input) {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        processOcrImageFile(file);
+        input.value = ''; // 清空，允許使用者重複選同一張圖再試一次
+    }
+
+    // 全域貼上事件：只在目前顯示「持股管理與記憶庫」頁籤、且剪貼簿內容是圖片時才處理，
+    // 避免使用者在其他輸入框貼一般文字時被意外攔截
+    function handleOcrPasteEvent(event) {
+        const manageTab = document.getElementById('tab-manage');
+        if (!manageTab || manageTab.classList.contains('hidden')) return;
+        const items = event.clipboardData && event.clipboardData.items;
+        if (!items) return;
+        for (const item of items) {
+            if (item.kind === 'file' && item.type && item.type.startsWith('image/')) {
+                const file = item.getAsFile();
+                if (file) {
+                    event.preventDefault();
+                    processOcrImageFile(file);
+                }
+                return;
+            }
+        }
+    }
+    document.addEventListener('paste', handleOcrPasteEvent);
+
+    // 共用流程：讀檔 → 顯示預覽 → 呼叫 AI 視覺辨識
+    function processOcrImageFile(file) {
+        const reader = new FileReader();
+        reader.onload = () => {
+            const dataUrl = reader.result;
+            const previewWrap = document.getElementById('ocr-preview-wrap');
+            const previewImg = document.getElementById('ocr-preview-img');
+            if (previewImg) previewImg.src = dataUrl;
+            if (previewWrap) previewWrap.classList.remove('hidden');
+            runOcrRecognition(dataUrl);
+        };
+        reader.onerror = () => {
+            setOcrStatus('讀取圖片檔案失敗，請換一張圖片再試一次。', true);
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function setOcrStatus(text, isError) {
+        const el = document.getElementById('ocr-status-note');
+        if (!el) return;
+        el.innerText = text;
+        el.className = isError ? 'text-xs font-bold' : 'text-xs text-gray-500';
+        if (isError) el.style.color = 'var(--c-accent)'; else el.style.color = '';
+    }
+
+    // 呼叫 OpenRouter 視覺模型辨識截圖：嚴格要求只回傳 JSON 陣列（代號／股數／成本），
+    // 用免費視覺模型當主力，被限流或出錯時依序自動改用備援模型，跟其他頁面的 AI 呼叫風格一致
+    async function runOcrRecognition(dataUrl) {
+        const apiKey = getOpenRouterApiKey();
+        if (!apiKey) {
+            setOcrStatus('請先到「系統與 API 設定」填入 OpenRouter API 金鑰，才能使用截圖辨識功能。', true);
+            return;
+        }
+        ocrParsedResults = [];
+        renderOcrResults();
+        setOcrStatus('AI 辨識中，請稍候...（依圖片複雜度可能需要數秒到十幾秒）', false);
+
+        const systemPrompt = [
+            '你是專精解析台股券商 App 庫存畫面與對帳單截圖的視覺辨識引擎。',
+            '使用者會上傳一張圖片，內容可能是券商庫存列表、庫存明細、或對帳單，裡面通常會有多筆持股。',
+            '請仔細辨識圖片中每一筆持股的三個欄位：',
+            '1. symbol：股票代號（4~6碼數字或英數字代碼，不要填公司中文名稱）。',
+            '2. shares：持有股數（整數）；如果圖片顯示的是「張」數，請自行換算成股數（1 張 = 1000 股）。',
+            '3. cost：買進成本或均價（每股金額，數字）。',
+            '只有能同時清楚辨識出這三項的持股才輸出；任何一項模糊不清或無法確定，整筆直接捨棄，絕對不要用 0 或用猜的湊數。',
+            '嚴格只能輸出一個 JSON 陣列，不要有任何其他文字、說明、Markdown 符號或程式碼區塊標記（不要加```），格式範例：',
+            '[{"symbol":"2330","shares":1000,"cost":600.5},{"symbol":"0050","shares":250,"cost":135.2}]',
+            '如果完全辨識不出任何一筆有效資料，就輸出空陣列 []。'
+        ].join('\n');
+
+        try {
+            const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`
+                },
+                body: JSON.stringify({
+                    model: 'google/gemini-2.0-flash-exp:free',
+                    // 主模型被限流／出錯時，依序自動改用下面這些免費視覺模型當備援
+                    models: ['meta-llama/llama-3.2-11b-vision-instruct:free', 'qwen/qwen2.5-vl-32b-instruct:free'],
+                    max_tokens: 1500,
+                    reasoning: { exclude: true },
+                    messages: [
+                        { role: 'system', content: systemPrompt },
+                        {
+                            role: 'user',
+                            content: [
+                                { type: 'text', text: '請辨識這張券商庫存或對帳單截圖裡的持股資料，依照系統規則只回傳 JSON 陣列。' },
+                                { type: 'image_url', image_url: { url: dataUrl } }
+                            ]
+                        }
+                    ]
+                })
+            });
+
+            if (!res.ok) {
+                const errText = await res.text().catch(() => '');
+                let msg = errText;
+                try {
+                    const parsed = JSON.parse(errText);
+                    msg = (parsed && parsed.error && parsed.error.message) || errText;
+                } catch (e) {}
+                const rateLimitHint = res.status === 429 ? '（免費模型當下被排隊的人太多，過一陣子再試一次）' : '';
+                setOcrStatus(`辨識失敗（HTTP ${res.status}）${msg ? '：' + msg.slice(0, 200) : ''}${rateLimitHint}`, true);
+                return;
+            }
+
+            const data = await res.json();
+            const text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+            const list = parseOcrJsonList(text);
+
+            if (!list.length) {
+                setOcrStatus('沒有辨識出有效的持股資料，請確認截圖清楚包含股票代號、股數與成本，或改用下方手動輸入。', true);
+                return;
+            }
+            ocrParsedResults = list;
+            renderOcrResults();
+            setOcrStatus(`辨識完成，找到 ${list.length} 筆持股，請核對修正後再匯入。`, false);
+        } catch (e) {
+            const raw = e && e.message ? e.message : String(e);
+            setOcrStatus(`AI 辨識呼叫失敗：${raw}（請確認裝置有連上網路，且沒有攔截外掛擋住 openrouter.ai）`, true);
+        }
+    }
+
+    // 從模型回傳的文字裡穩健地截出 JSON 陣列並解析：模型偶爾還是會夾帶前後贅字或
+    // ```json 區塊標記，這裡用「找第一個 [ 到最後一個 ] 」的方式盡量容錯
+    function parseOcrJsonList(text) {
+        if (!text) return [];
+        const start = text.indexOf('[');
+        const end = text.lastIndexOf(']');
+        if (start === -1 || end === -1 || end < start) return [];
+        try {
+            const raw = JSON.parse(text.slice(start, end + 1));
+            if (!Array.isArray(raw)) return [];
+            return raw
+                .map(item => ({
+                    symbol: String(item.symbol || '').trim(),
+                    shares: parseInt(item.shares, 10),
+                    cost: parseFloat(item.cost)
+                }))
+                .filter(item => item.symbol && Number.isFinite(item.shares) && item.shares > 0 && Number.isFinite(item.cost) && item.cost > 0);
+        } catch (e) {
+            return [];
+        }
+    }
+
+    // 把辨識結果畫成可編輯的確認清單（代號／股數／成本都可以直接修正），
+    // 每一列都有獨立的刪除按鈕，確認匯入時直接讀取這些輸入框當下的最新值
+    function renderOcrResults() {
+        const el = document.getElementById('ocr-result-list');
+        const importBtn = document.getElementById('ocr-import-btn');
+        if (!el) return;
+        if (!ocrParsedResults.length) {
+            el.innerHTML = '';
+            if (importBtn) importBtn.classList.add('hidden');
+            return;
+        }
+        el.innerHTML = ocrParsedResults.map((item, i) => `
+            <div class="flex items-center gap-2" data-ocr-row="${i}">
+                <input value="${escapeHtml(item.symbol)}" class="ocr-symbol-input bg-gray-50 border border-gray-200 p-2 rounded-lg text-xs text-gray-900 focus:outline-none focus:border-black" style="width:88px;" placeholder="代號">
+                <input type="number" value="${item.shares}" class="ocr-shares-input bg-gray-50 border border-gray-200 p-2 rounded-lg text-xs text-gray-900 focus:outline-none focus:border-black flex-1" placeholder="股數">
+                <input type="number" value="${item.cost}" class="ocr-cost-input bg-gray-50 border border-gray-200 p-2 rounded-lg text-xs text-gray-900 focus:outline-none focus:border-black flex-1" placeholder="成本">
+                <button type="button" onclick="removeOcrResultRow(${i})" class="text-gray-300 hover:text-red-500 font-black px-1" aria-label="移除這一列">×</button>
+            </div>`).join('');
+        if (importBtn) importBtn.classList.remove('hidden');
+    }
+
+    function removeOcrResultRow(i) {
+        ocrParsedResults.splice(i, 1);
+        renderOcrResults();
+    }
+
+    // [確認無誤，批次匯入這些持股]：讀取確認清單目前畫面上（使用者可能已手動修正過）的
+    // 代號／股數／成本，逐筆驗證後批次加進 appData.stocks；已經持有相同代號的直接跳過並提醒，
+    // 不會自動加碼或覆蓋既有部位。純粹回填既有持股，不動現金。
+    async function confirmImportOcrResults() {
+        const rows = document.querySelectorAll('#ocr-result-list [data-ocr-row]');
+        if (!rows.length) return;
+
+        const toImport = [];
+        const invalidRows = [];
+        const skippedExisting = [];
+        rows.forEach(row => {
+            const symbol = row.querySelector('.ocr-symbol-input').value.trim();
+            const shares = parseInt(row.querySelector('.ocr-shares-input').value, 10);
+            const cost = parseFloat(row.querySelector('.ocr-cost-input').value);
+            if (!symbol || !Number.isFinite(shares) || shares <= 0 || !Number.isFinite(cost) || cost <= 0) {
+                invalidRows.push(symbol || '(空白)');
+                return;
+            }
+            if (appData.stocks.some(s => s.symbol === symbol) || toImport.some(s => s.symbol === symbol)) {
+                skippedExisting.push(symbol);
+                return;
+            }
+            toImport.push({ symbol, shares, cost });
+        });
+
+        if (!toImport.length) {
+            alert('沒有可匯入的資料，請確認每一列都已填妥股票代號、股數與成本，且不是重複的持股。');
+            return;
+        }
+
+        const proceed = confirm(
+            `確定要批次匯入這 ${toImport.length} 筆持股嗎？\n\n` +
+            toImport.map(s => `${s.symbol}　${s.shares} 股　成本 ${s.cost}`).join('\n') +
+            `\n\n這只會新增持股紀錄，不會從現金扣款。`
+        );
+        if (!proceed) return;
+
+        for (const item of toImport) {
+            const name = getCompanyName(item.symbol);
+            const eod = stockDayAllMap[item.symbol];
+            const price = eod && !isNaN(eod.close) ? eod.close : item.cost;
+            const newStock = {
+                symbol: item.symbol, name, shares: item.shares, cost: item.cost, price,
+                market_val: item.shares * price, priceSource: eod ? 'eod' : null,
+                buyDate: todayISODate(), dividendHistory: []
+            };
+            appData.stocks.push(newStock);
+        }
+        persistHoldings();
+        renderUI();
+
+        // 清空 OCR 面板，回到初始狀態，準備下一次辨識
+        ocrParsedResults = [];
+        renderOcrResults();
+        setOcrStatus('', false);
+        const previewWrap = document.getElementById('ocr-preview-wrap');
+        if (previewWrap) previewWrap.classList.add('hidden');
+
+        for (const item of toImport) {
+            refreshIndustryInBackground(item.symbol);
+        }
+        triggerGlobalRefresh(false);
+
+        let doneMsg = `已匯入 ${toImport.length} 筆持股。`;
+        if (skippedExisting.length) doneMsg += `（略過已持有的重複代號：${skippedExisting.join('、')}）`;
+        if (invalidRows.length) doneMsg += `（有 ${invalidRows.length} 列資料不完整，未匯入）`;
+        setOcrStatus(doneMsg, false);
     }
 
     /* ========================================================================
