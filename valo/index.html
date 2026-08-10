@@ -1092,7 +1092,7 @@
                                     <button type="button" onclick="document.getElementById('ocr-image-input').click()" class="text-xs font-black bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-full transition whitespace-nowrap">上傳截圖</button>
                                     <input type="file" id="ocr-image-input" accept="image/*" class="hidden" onchange="handleOcrImageSelect(this)">
                                 </div>
-                                <p class="text-[11px] text-gray-400">上傳券商 App 庫存畫面或對帳單截圖，或直接在這個頁面按 Ctrl+V 貼上；AI 辨識出的股票代號、股數、成本會列在下方，可自行修正後再一鍵批次匯入（僅新增持股紀錄，不會扣款，如需同步登記現金異動請自行於上方現金功能調整）。</p>
+                                <p class="text-[11px] text-gray-400">上傳券商 App 庫存畫面或對帳單截圖，或直接在這個頁面按 Ctrl+V 貼上；AI 辨識出的股票代號、股數、成本會列在下方，可自行修正後再一鍵批次匯入（僅新增持股紀錄，不會扣款，如需同步登記現金異動請自行於上方現金功能調整）。使用 OpenRouter 免費模型路由器辨識，完全不收費。</p>
                                 <div id="ocr-preview-wrap" class="hidden">
                                     <img id="ocr-preview-img" class="max-h-40 rounded-lg border border-gray-200" alt="OCR 截圖預覽">
                                 </div>
@@ -7063,8 +7063,19 @@
     }
 
     // 呼叫 OpenRouter 視覺模型辨識截圖，嚴格要求只回傳 JSON 陣列（代號／股數／成本）。
-    // 固定直接呼叫單一模型 google/gemini-flash-1.5，不再組一串備援模型陣列。
-    const OCR_VISION_MODEL = 'google/gemini-flash-1.5';
+    //
+    // 模型選擇策略（這裡吃過兩次虧才定案）：直接寫死單一個模型代號（不管是免費的
+    // gemini-2.0-flash-exp:free，還是付費的 google/gemini-flash-1.5）都曾經在沒有預警
+    // 的情況下被 OpenRouter／供應商悄悄下架或改名，導致整支功能噴 404 No endpoints found。
+    // 所以改成：
+    //   1. 主要模型固定用 OpenRouter 官方維運的「Free Models Router」（model: 'openrouter/free'）
+    //      ——這不是某個特定模型，而是官方路由器，每次請求都會即時從當下所有還在線上、
+    //      確實支援圖片輸入的免費模型裡自動挑一個，完全免費，不會因為我們寫死的名稱過期而打不通。
+    //   2. 萬一 Free Router 那個當下剛好也不可用，才會用 OpenRouter 原生的「models」自動
+    //      容錯機制依序改試這兩個目前穩定、長期維護、確定支援視覺輸入的計費模型當保底
+    //      （只有真的用到才會扣款，金額極小，通常不到 0.01 美元）。
+    const OCR_VISION_MODEL = 'openrouter/free';
+    const OCR_VISION_FALLBACK_MODELS = ['openai/gpt-4o-mini', 'google/gemini-2.5-flash'];
     async function runOcrRecognition(dataUrl) {
         const apiKey = getOpenRouterApiKey();
         if (!apiKey) {
@@ -7097,6 +7108,7 @@
                 },
                 body: JSON.stringify({
                     model: OCR_VISION_MODEL,
+                    models: OCR_VISION_FALLBACK_MODELS,
                     max_tokens: 1500,
                     messages: [
                         { role: 'system', content: systemPrompt },
@@ -7118,8 +7130,9 @@
                     const parsed = JSON.parse(errText);
                     msg = (parsed && parsed.error && parsed.error.message) || errText;
                 } catch (e) {}
-                const rateLimitHint = res.status === 429 ? '（当下被排隊的人太多，過一陣子再試一次）' : '';
-                setOcrStatus(`辨識失敗（HTTP ${res.status}）${msg ? '：' + msg.slice(0, 200) : ''}${rateLimitHint}`, true);
+                const rateLimitHint = res.status === 429 ? '（免費額度目前被排隊的人太多，過一陣子再試一次）' : '';
+                const noEndpointHint = /no endpoints found/i.test(msg) ? '（連保底模型都找不到端點，這通常代表 OpenRouter 那端當下有異常，過一陣子再試一次；如果持續發生，請回報讓我們檢查模型設定）' : '';
+                setOcrStatus(`辨識失敗（HTTP ${res.status}）${msg ? '：' + msg.slice(0, 200) : ''}${rateLimitHint}${noEndpointHint}`, true);
                 return;
             }
 
@@ -7133,7 +7146,8 @@
             }
             ocrParsedResults = list;
             renderOcrResults();
-            setOcrStatus(`辨識完成，找到 ${list.length} 筆持股，請核對修正後再匯入。`, false);
+            const usedModel = (data && data.model) ? `（本次由 ${data.model} 辨識）` : '';
+            setOcrStatus(`辨識完成，找到 ${list.length} 筆持股，請核對修正後再匯入。${usedModel}`, false);
         } catch (e) {
             const raw = e && e.message ? e.message : String(e);
             setOcrStatus(`AI 辨識呼叫失敗：${raw}（請確認裝置有連上網路，且沒有攔截外掛擋住 openrouter.ai）`, true);
