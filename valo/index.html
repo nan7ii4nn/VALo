@@ -1092,7 +1092,7 @@
                                     <button type="button" onclick="document.getElementById('ocr-image-input').click()" class="text-xs font-black bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-full transition whitespace-nowrap">上傳截圖</button>
                                     <input type="file" id="ocr-image-input" accept="image/*" class="hidden" onchange="handleOcrImageSelect(this)">
                                 </div>
-                                <p class="text-[11px] text-gray-400">上傳券商 App 庫存畫面或對帳單截圖，或直接在這個頁面按 Ctrl+V 貼上；AI 辨識出的股票代號、股數、成本會列在下方，可自行修正後再一鍵批次匯入（僅新增持股紀錄，不會扣款，如需同步登記現金異動請自行於上方現金功能調整）。使用 OpenRouter 免費模型路由器辨識，完全不收費。</p>
+                                <p class="text-[11px] text-gray-400">上傳券商 App 庫存畫面或對帳單截圖，或直接在這個頁面按 Ctrl+V 貼上；AI 辨識出的股票代號、股數、成本會列在下方，可自行修正後再一鍵批次匯入（僅新增持股紀錄，不會扣款，如需同步登記現金異動請自行於上方現金功能調整）。</p>
                                 <div id="ocr-preview-wrap" class="hidden">
                                     <img id="ocr-preview-img" class="max-h-40 rounded-lg border border-gray-200" alt="OCR 截圖預覽">
                                 </div>
@@ -3277,14 +3277,50 @@
                     <div class="font-bold text-gray-800 cursor-pointer" onclick="selectStock('${s.symbol}')">${s.symbol} ${s.name} ${badge}</div>
                     <div class="text-gray-500">NT$ ${fmtNum(s.price)}　${s.shares.toLocaleString()} 股</div>
                     <div class="${pnl >= 0 ? 'text-red-500' : 'text-green-600'} font-bold" title="已扣賣出手續費與證交稅">${pnl >= 0 ? '+' : ''}${fmtNum(pnl)}</div>
-                    <button type="button" onclick="removeStock(${i})" class="text-gray-300 hover:text-red-500 font-black px-2">×</button>
+                    <div class="flex items-center gap-1">
+                        <button type="button" onclick="toggleEditStockRow(${i})" class="text-gray-300 hover:text-gray-600 font-black text-[10px] px-1.5 uppercase tracking-wide">編輯</button>
+                        <button type="button" onclick="removeStock(${i})" class="text-gray-300 hover:text-red-500 font-black px-2">×</button>
+                    </div>
                 </div>
                 <div class="text-[11px] text-gray-400 mt-1 pl-0">
                     左側損益已扣費：若今天全部平倉，賣出金額 NT$ ${fmtNum(c.amount)}，手續費 NT$ ${fmtNum(c.fee)}＋${isETF(s.symbol) ? 'ETF' : '股票'}證交稅（${(isETF(s.symbol)?TAX_RATE_ETF:TAX_RATE_STOCK)*100}%）NT$ ${fmtNum(c.tax)}，
                     稅費合計 NT$ ${fmtNum(c.totalCost)}，扣完稅費約可拿回 <span class="font-bold text-gray-600">NT$ ${fmtNum(c.netProceeds)}</span>。
                 </div>
+                <div id="stock-edit-row-${i}" class="hidden flex items-center gap-2 mt-2 pt-2 border-t border-gray-100">
+                    <input type="number" id="edit-shares-${i}" value="${s.shares}" class="bg-gray-50 border border-gray-200 p-2 rounded-lg text-xs w-24 focus:outline-none focus:border-black" placeholder="股數">
+                    <input type="number" id="edit-cost-${i}" value="${s.cost}" class="bg-gray-50 border border-gray-200 p-2 rounded-lg text-xs w-24 focus:outline-none focus:border-black" placeholder="成本">
+                    <button type="button" onclick="updateStock(${i})" class="bg-black text-white text-xs font-bold px-3 py-2 rounded-lg hover:bg-gray-800 transition">儲存</button>
+                    <button type="button" onclick="toggleEditStockRow(${i})" class="bg-gray-100 text-gray-600 text-xs font-bold px-3 py-2 rounded-lg hover:bg-gray-200 transition">取消</button>
+                </div>
             </div>`;
         }).join('') || '<p class="text-gray-400 text-xs py-2">目前尚無持股，請從下方新增。</p>';
+    }
+
+    // 展開／收合單筆持股的行內編輯區塊（股數／成本），修正輸入錯誤用
+    function toggleEditStockRow(i) {
+        const row = document.getElementById(`stock-edit-row-${i}`);
+        if (row) row.classList.toggle('hidden');
+    }
+
+    // [編輯持股]：純粹修正股數／成本的資料校正，不影響現金、不產生已實現損益紀錄——
+    // 跟 removeStock()（視同今天全部賣出、會退款並歸檔到流水帳）語意完全不同，
+    // 只是把這筆持股本身的資料改對，改完立刻同步寫回 Firestore，避免重新整理後又跑掉。
+    function updateStock(i) {
+        const stock = appData.stocks[i];
+        if (!stock) return;
+        const sharesInput = document.getElementById(`edit-shares-${i}`);
+        const costInput = document.getElementById(`edit-cost-${i}`);
+        const shares = parseInt(sharesInput.value, 10);
+        const cost = parseFloat(costInput.value);
+        if (!Number.isFinite(shares) || shares <= 0 || !Number.isFinite(cost) || cost <= 0) {
+            alert('請輸入有效的股數與成本（需大於 0）。');
+            return;
+        }
+        stock.shares = shares;
+        stock.cost = cost;
+        stock.market_val = shares * (stock.price || cost);
+        persistHoldings();
+        renderUI();
     }
 
     // 移除持股＝視同「今天用現價全部平倉賣出」：賣出退款淨額 = 股數 × 現價 − 賣出手續費 − 證交稅，
@@ -7027,13 +7063,8 @@
     }
 
     // 呼叫 OpenRouter 視覺模型辨識截圖，嚴格要求只回傳 JSON 陣列（代號／股數／成本）。
-    // 模型固定使用 OpenRouter 官方的「Free Models Router」（model: 'openrouter/free'）：
-    // 這不是某一個特定模型的別名，而是 OpenRouter 官方維運的路由器，會即時從當下所有
-    // 「還在線上、確實支援圖片輸入」的免費模型裡自動挑一個來處理這個請求，完全免費、
-    // 不會扣款。比起我們自己在程式碼裡寫死某個 :free 模型名稱穩定得多——那些免費模型
-    // 常常被供應商說下架就下架，才會一直遇到 404 No endpoints found；交給官方路由器
-    // 動態選擇，就不會再因為我們寫死的名稱過期而打不通。
-    const OCR_VISION_MODEL = 'openrouter/free';
+    // 固定直接呼叫單一模型 google/gemini-flash-1.5，不再組一串備援模型陣列。
+    const OCR_VISION_MODEL = 'google/gemini-flash-1.5';
     async function runOcrRecognition(dataUrl) {
         const apiKey = getOpenRouterApiKey();
         if (!apiKey) {
@@ -7087,7 +7118,7 @@
                     const parsed = JSON.parse(errText);
                     msg = (parsed && parsed.error && parsed.error.message) || errText;
                 } catch (e) {}
-                const rateLimitHint = res.status === 429 ? '（免費額度目前被排隊的人太多，過一陣子再試一次）' : '';
+                const rateLimitHint = res.status === 429 ? '（当下被排隊的人太多，過一陣子再試一次）' : '';
                 setOcrStatus(`辨識失敗（HTTP ${res.status}）${msg ? '：' + msg.slice(0, 200) : ''}${rateLimitHint}`, true);
                 return;
             }
@@ -7102,8 +7133,7 @@
             }
             ocrParsedResults = list;
             renderOcrResults();
-            const usedModel = (data && data.model) ? `（本次由免費模型 ${data.model} 辨識）` : '';
-            setOcrStatus(`辨識完成，找到 ${list.length} 筆持股，請核對修正後再匯入。${usedModel}`, false);
+            setOcrStatus(`辨識完成，找到 ${list.length} 筆持股，請核對修正後再匯入。`, false);
         } catch (e) {
             const raw = e && e.message ? e.message : String(e);
             setOcrStatus(`AI 辨識呼叫失敗：${raw}（請確認裝置有連上網路，且沒有攔截外掛擋住 openrouter.ai）`, true);
