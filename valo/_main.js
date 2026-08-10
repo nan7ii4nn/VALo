@@ -5346,6 +5346,90 @@
     }
 
     /* ========================================================================
+       JSON / 文字批次快速匯入：完全不靠任何 AI／外部 API，使用者自己貼上（或請任何 AI
+       聊天工具幫忙轉換成）標準 JSON 陣列字串，前端直接 parse 後批次寫入 appData.stocks，
+       瞬間完成、也不會受限流或額度影響，是 OCR 截圖辨識暫時打不開時的可靠備援管道。
+       跟 OCR 匯入共用同一套「批次新增、不扣現金」語意，也共用同一個 parseOcrJsonList()
+       解析器（接受 code/symbol 兩種欄位名稱），只是資料來源改成使用者自己貼的文字。
+    ======================================================================== */
+    function toggleJsonImportHelp() {
+        const help = document.getElementById('json-import-help');
+        if (help) help.classList.toggle('hidden');
+    }
+
+    function setJsonImportStatus(text, isError) {
+        const el = document.getElementById('json-import-status-note');
+        if (!el) return;
+        el.innerText = text;
+        el.className = isError ? 'text-xs font-bold' : 'text-xs text-gray-500';
+        if (isError) el.style.color = 'var(--c-accent)'; else el.style.color = '';
+    }
+
+    // [確認批次匯入]：讀取文字框內容 → 解析成 [{symbol, shares, cost}, ...] → 逐筆驗證後
+    // 直接批次寫入 appData.stocks，並呼叫 persistHoldings() 同步寫回 Firestore 雲端。
+    // 已經持有相同代號的直接跳過並提醒，不會自動加碼或覆蓋既有部位。
+    async function confirmImportJsonBatch() {
+        const textarea = document.getElementById('json-import-textarea');
+        const raw = textarea ? textarea.value.trim() : '';
+        if (!raw) {
+            setJsonImportStatus('請先貼上 JSON 陣列格式的資料，例如：[{"code":"0050","shares":50,"cost":76.4}]', true);
+            return;
+        }
+
+        const list = parseOcrJsonList(raw);
+        if (!list.length) {
+            setJsonImportStatus('沒有解析出有效資料，請確認格式是陣列，且每筆都有代號（code）、股數（shares）、成本（cost）三個欄位，數值都要大於 0。', true);
+            return;
+        }
+
+        const toImport = [];
+        const skippedExisting = [];
+        list.forEach(item => {
+            if (appData.stocks.some(s => s.symbol === item.symbol) || toImport.some(s => s.symbol === item.symbol)) {
+                skippedExisting.push(item.symbol);
+                return;
+            }
+            toImport.push(item);
+        });
+
+        if (!toImport.length) {
+            setJsonImportStatus(`解析出 ${list.length} 筆資料，但全部都是已經持有的重複代號（${skippedExisting.join('、')}），沒有新增任何持股。`, true);
+            return;
+        }
+
+        const proceed = confirm(
+            `確定要批次匯入這 ${toImport.length} 筆持股嗎？\n\n` +
+            toImport.map(s => `${s.symbol}　${s.shares} 股　成本 ${s.cost}`).join('\n') +
+            `\n\n這只會新增持股紀錄，不會從現金扣款。`
+        );
+        if (!proceed) return;
+
+        for (const item of toImport) {
+            const name = getCompanyName(item.symbol);
+            const eod = stockDayAllMap[item.symbol];
+            const price = eod && !isNaN(eod.close) ? eod.close : item.cost;
+            const newStock = {
+                symbol: item.symbol, name, shares: item.shares, cost: item.cost, price,
+                market_val: item.shares * price, priceSource: eod ? 'eod' : null,
+                buyDate: todayISODate(), dividendHistory: []
+            };
+            appData.stocks.push(newStock);
+        }
+        persistHoldings(); // 批次寫入後立刻同步到 Firestore 雲端，重新整理／換裝置登入都看得到
+        renderUI();
+
+        if (textarea) textarea.value = '';
+        for (const item of toImport) {
+            refreshIndustryInBackground(item.symbol);
+        }
+        triggerGlobalRefresh(false);
+
+        let doneMsg = `已匯入 ${toImport.length} 筆持股並同步至雲端。`;
+        if (skippedExisting.length) doneMsg += `（略過已持有的重複代號：${skippedExisting.join('、')}）`;
+        setJsonImportStatus(doneMsg, false);
+    }
+
+    /* ========================================================================
        截圖 OCR 智慧辨識匯入（雲端 AI 視覺辨識版）：上傳／貼上券商庫存截圖，直接送給
        OpenRouter 上支援看圖的視覺模型（google/gemini-2.5-flash，備援 google/gemini-flash-1.5），
        請它把表格裡每一列的「股票代號／股數／成本」抓出來、回傳嚴格 JSON 陣列，前端解析成
@@ -5469,7 +5553,7 @@
                     msg = (parsed && parsed.error && parsed.error.message) || errText;
                 } catch (e) {}
                 const rateLimitHint = res.status === 429 ? '（這個模型當下被排隊的人太多，過一陣子再試一次）' : '';
-                setOcrStatus(`辨識失敗（HTTP ${res.status}）：${msg ? msg.slice(0, 200) : '未知錯誤'}${rateLimitHint}`, true);
+                setOcrStatus(`辨識失敗（HTTP ${res.status}）：${msg ? msg.slice(0, 200) : '未知錯誤'}${rateLimitHint}，也可以改用上方「JSON / 文字批次快速匯入」。`, true);
                 return;
             }
 
@@ -5478,7 +5562,7 @@
             const list = parseOcrJsonList(text);
 
             if (!list.length) {
-                setOcrStatus('AI 沒有從這張截圖辨識出可用的持股資料，請確認截圖有清楚拍到代號／股數／成本欄位，或換一張再試一次。', true);
+                setOcrStatus('AI 沒有從這張截圖辨識出可用的持股資料，請確認截圖有清楚拍到代號／股數／成本欄位，或換一張再試一次，也可以改用上方「JSON / 文字批次快速匯入」。', true);
                 return;
             }
             ocrParsedResults = list;
@@ -5486,14 +5570,15 @@
             setOcrStatus(`辨識完成，找到 ${list.length} 筆持股。請逐筆核對修正後再匯入。`, false);
         } catch (e) {
             const raw = e && e.message ? e.message : String(e);
-            const hint = '（瀏覽器連線被擋下，常見原因：裝置沒有網路、或有廣告攔截／隱私外掛擋住了 openrouter.ai，可以先關掉攔截外掛再試一次）';
+            const hint = '（瀏覽器連線被擋下，常見原因：裝置沒有網路、或有廣告攔截／隱私外掛擋住了 openrouter.ai，可以先關掉攔截外掛再試一次，或改用上方「JSON / 文字批次快速匯入」）';
             setOcrStatus(`AI 辨識呼叫失敗：${raw}\n${hint}`, true);
         }
     }
 
-    // 把 AI 回傳的文字盡量解析成 [{code, shares, cost}, ...]：優先嘗試直接 JSON.parse 整段文字，
-    // 失敗的話（AI 偶爾還是會夾雜一點說明文字或```json```包裝）改用正規表達式抓出最外層的
-    // [...] 區塊再解析一次。每一筆都要有效的代號＋股數＋成本才會保留，不完整的整筆捨棄。
+    // 把 AI 回傳的文字（或使用者自己貼的 JSON 文字）盡量解析成 [{symbol, shares, cost}, ...]：
+    // 優先嘗試直接 JSON.parse 整段文字，失敗的話（夾雜一點說明文字或```json```包裝）改用
+    // 正規表達式抓出最外層的 [...] 區塊再解析一次。每一筆都要有效的代號＋股數＋成本才會保留，
+    // 不完整的整筆捨棄。同時給 OCR 辨識結果與「JSON / 文字批次快速匯入」共用。
     function parseOcrJsonList(text) {
         if (!text) return [];
         let raw = text.trim();
