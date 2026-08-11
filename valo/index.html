@@ -20,6 +20,12 @@
 
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- 動態趨勢圖表的滾輪縮放／拖曳平移：hammer.js 負責觸控手勢（雙指縮放/拖曳），
+         chartjs-plugin-zoom 是實際的縮放平移外掛，UMD 版本在偵測到全域 Chart 物件後
+         會自動呼叫 Chart.register() 完成註冊，不需要在下面的程式碼裡再手動註冊一次。
+         載入順序固定要是：chart.js → hammer.js → chartjs-plugin-zoom，順序錯了外掛會抓不到 Chart。 -->
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2"></script>
     <!-- 改用完整 D3 v7 套件（本來只載 d3-delaunay 子模組）：完整版一樣有 d3.Delaunay.from，
          同時多了 d3-transition／d3-ease，讓資金配置頁的液體水波可以用 d3.transition() +
          d3.easeCubicInOut 做平滑的 0.8 秒緩動變形，而不是瞬間跳變。這是 D3 官方最標準、
@@ -3170,6 +3176,19 @@
     // 依「雙軌制」估算某檔持股的預估股利：官方公告優先（perShareCash > 0 才算數，避免揭露 0
     // 元股利的紀錄被誤判成「有公告」），沒有官方公告資料才退而求其次，用歷史殖利率 × 持有市值估算。
     // 兩軌都沒有資料就回傳 null，呼叫端要自行處理「無法估算」的顯示情況。
+    // 常見台股 ETF 的合理殖利率預估區間備援表：當官方公告（TWSE 開放資料）與歷史殖利率
+    // （BWIBBU 資料）兩軌都抓不到資料時（API 逾時、被擋、資料來源本身暫時缺漏等），
+    // 用這裡查表得到的數字概算，讓畫面與「一鍵股利入帳」按鈕都能正常運作，不會整片卡死在
+    // 「無法估算」。數字是市場常見的粗略殖利率區間，僅供參考用途，不是精確保證值，真正入帳
+    // 金額仍以之後官方公告或使用者自行核對為準。
+    const DEFAULT_DIVIDEND_YIELD_MAP = {
+        '0050': 0.032, '006208': 0.032, '0056': 0.065, '00878': 0.055,
+        '00713': 0.09, '00929': 0.09, '00919': 0.09, '00939': 0.08,
+        '00940': 0.06, '00915': 0.07, '00918': 0.09, '00934': 0.08
+    };
+    // 查不到代號專屬預估值的一般個股或 ETF，用這個保守基準值當最後備援
+    const DEFAULT_FALLBACK_DIVIDEND_YIELD = 0.04;
+
     function estimateDividendForStock(stock) {
         const announce = dividendAnnounceMap[stock.symbol];
         if (announce && announce.perShareCash > 0) {
@@ -3190,6 +3209,20 @@
                 meta: `依歷史殖利率 ${bw.yield.toFixed(2)}% 估算`
             };
         }
+        // 兩軌官方／歷史資料都抓不到：不要直接判定「無法估算」，改用預估備援機制——
+        // 常見 ETF 查表給合理殖利率區間，其餘一般個股/ETF 用保守的 4% 預設值概算，
+        // 只要這檔持股至少有股價或成本可以算出市值，就一定能給出一個可用的預估金額。
+        const marketVal = (stock.price || stock.cost) * stock.shares;
+        if (marketVal > 0) {
+            const fallbackYield = DEFAULT_DIVIDEND_YIELD_MAP[stock.symbol] || DEFAULT_FALLBACK_DIVIDEND_YIELD;
+            return {
+                track: 'fallback',
+                perShare: null,
+                totalAmount: Math.round(marketVal * fallbackYield),
+                meta: `官方公告與歷史殖利率暫時都讀不到，改用預估殖利率 ${(fallbackYield * 100).toFixed(1)}% 概算（僅供參考）`
+            };
+        }
+        // 連市值都算不出來（沒有股價、也沒有成本可用）時，才是真的完全無法估算
         return null;
     }
 
@@ -3737,7 +3770,9 @@
             }
             const badge = est.track === 'official'
                 ? `<span class="diag-badge bear">[已公告]</span>`
-                : `<span class="diag-badge">[歷史推估]</span>`;
+                : est.track === 'historical'
+                ? `<span class="diag-badge">[歷史推估]</span>`
+                : `<span class="diag-badge">[預估值]</span>`;
             return `<div class="py-4">
                 <div class="flex justify-between items-center text-xs gap-3">
                     <div class="font-bold text-gray-800">${stock.symbol} ${stock.name}</div>
@@ -6637,6 +6672,27 @@
                         show: !!breakeven,
                         price: breakeven,
                         label: breakeven ? `保本成本價 NT$ ${fmtNum(breakeven)}` : ''
+                    },
+                    // 滾輪縮放／拖曳平移：修復「時間軸無法向後滑動看更早歷史」的問題。
+                    // pan.enabled 讓使用者可以直接用滑鼠左右拖曳（或觸控滑動）平移時間軸；
+                    // zoom.wheel.enabled 讓滑鼠滾輪可以縮放檢視範圍；兩者 mode 都固定為 'x'，
+                    // 只允許水平方向縮放/平移（Y 軸價格刻度維持自動貼齊，不會跟著亂跑）。
+                    // limits.x 用 'original' 限制平移/縮放範圍不會超出原始資料的頭尾，
+                    // 避免使用者拖到完全空白、沒有任何資料點的畫面。
+                    zoom: {
+                        pan: {
+                            enabled: true,
+                            mode: 'x',
+                            modifierKey: null
+                        },
+                        zoom: {
+                            wheel: { enabled: true },
+                            pinch: { enabled: true },
+                            mode: 'x'
+                        },
+                        limits: {
+                            x: { min: 'original', max: 'original' }
+                        }
                     }
                 },
                 scales: {
