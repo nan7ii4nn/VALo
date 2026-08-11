@@ -10,7 +10,8 @@
        2. 「建構」→「Firestore Database」→「建立資料庫」（可選「正式環境」或「測試模式」皆可，之後用下方規則保護資料）。
        3. 「專案設定」（左上角齒輪）→「一般」→ 拉到最下面「你的應用程式」→ 新增一個「網頁應用程式」，
           複製它顯示的 firebaseConfig 物件，整組貼過來取代下面這個範例值。
-       4. 到「Firestore Database」→「規則」，貼上以下規則後發布，確保使用者只能讀寫自己的資料：
+       4. 到「Firestore Database」→「規則」，貼上以下規則後按「發布」，確保使用者只能讀寫自己的資料
+          （同一份規則也放在專案裡的 firestore.rules 檔案，可以直接複製貼上）：
             rules_version = '2';
             service cloud.firestore {
               match /databases/{database}/documents {
@@ -19,6 +20,12 @@
                 }
               }
             }
+          ⚠️ 這是本系統「登入讀不到舊資料」「操作後雲端沒有更新」最常見的原因：如果 Firestore
+          Database 是選「測試模式」建立的，預設規則只有 30 天效期，一旦到期就會自動變成
+          「拒絕所有讀寫」，就算帳號正常登入、程式碼完全正常，也一樣讀不到、存不進去。
+          請務必手動貼上面這段規則並發布，不要依賴測試模式的預設值。
+          （這個網頁本身也內建了讀寫失敗提示：只要 Firestore 讀取或寫入失敗，畫面最上方會立刻
+          跳出一條深色橫幅告訴你失敗原因，不會再像以前一樣只悄悄印在瀏覽器 console 裡看不到。）
        5. 「Authentication」→「Settings」→「已授權網域」，把你實際會用來打開這個網頁的網域也加進去
           （例如你之後把這個檔案架設到自己的網站時的網域；本機用 file:// 開啟 Google 登入彈窗可能會被瀏覽器擋，
           建議改用 email/密碼登入，或先把檔案放到有網域的靜態網站託管服務上）。
@@ -299,11 +306,11 @@
         disclaimerAgreed = true;
         closeDisclaimerModal();
         if (currentUser && fbDb) {
-            userDocRef('settings').set({
+            reportFirestoreWrite(userDocRef('settings').set({
                 disclaimerAgreed: true,
                 disclaimerAgreedAt: firebase.firestore.FieldValue.serverTimestamp(),
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-            }, { merge: true }).catch(e => console.warn('雲端儲存失敗（免責聲明同意紀錄）', e));
+            }, { merge: true }), '免責聲明同意紀錄');
         }
 
         // 零內容外洩關卡的最後一步：寫入同意紀錄、關閉 Modal 之後，這裡才第一次把 app-shell 的
@@ -418,6 +425,54 @@
         if (fbAuth) await fbAuth.signOut();
     }
 
+    /* ---- 雲端同步狀態橫幅：Firestore 讀取／寫入失敗時，不能只是 console.warn 悄悄吞掉——
+       使用者完全看不到 console，會誤以為資料已經存好了，直到某天重新整理或換裝置登入才發現
+       整批不見。這裡統一用一個固定在畫面最上層的橫幅顯示，並依錯誤類型（權限被拒／網路離線／
+       其他）給出對應的排查方向，其中「permission-denied」幾乎都是 Firebase Console 的
+       Firestore 安全規則沒有正確設定成「只允許本人讀寫自己的資料」造成的，這是實務上最常見、
+       也最容易被忽略的原因（規則沒發布、或還停在測試模式 30 天到期後自動全部拒絕）。 ---- */
+    function showCloudSyncBanner(text) {
+        const banner = document.getElementById('cloud-sync-banner');
+        const textEl = document.getElementById('cloud-sync-banner-text');
+        if (!banner || !textEl) return;
+        textEl.innerText = text;
+        banner.classList.remove('hidden');
+    }
+
+    function hideCloudSyncBanner() {
+        const banner = document.getElementById('cloud-sync-banner');
+        if (banner) banner.classList.add('hidden');
+    }
+
+    // 依 Firestore 回傳的錯誤代碼／訊息，組出白話的排查提示；kind 是 'read' 或 'write'
+    function buildCloudSyncErrorMessage(contextLabel, e, kind) {
+        const code = (e && e.code) || '';
+        const msg = (e && e.message) || String(e || '未知錯誤');
+        const isPermission = code === 'permission-denied' || /permission/i.test(msg);
+        const isNetwork = code === 'unavailable' || /network|offline/i.test(msg);
+        const action = kind === 'write' ? '寫入' : '讀取';
+        let hint;
+        if (isPermission) {
+            hint = '最可能的原因：Firebase Console 的 Firestore「安全規則」尚未正確設定（或還停在測試模式、已經到期），導致已登入的帳號也被拒絕讀寫自己的資料。請到 Firebase Console →「Firestore Database」→「規則」，貼上 index.html 開頭 Firebase 區塊註解裡的規則後按「發布」。';
+        } else if (isNetwork) {
+            hint = '最可能的原因：目前裝置沒有網路連線或連線不穩定，請確認網路狀態後重試一次。';
+        } else {
+            hint = '請重新整理頁面再試一次；如果持續發生，請檢查 Firebase 專案設定（firebaseConfig）與 Firestore 安全規則是否正確。';
+        }
+        return `雲端${action}失敗（${contextLabel}）：${msg}\n${hint}`;
+    }
+
+    // 統一包裝所有 Firestore 寫入 Promise：失敗時攔截並顯示雲端同步橫幅，成功時如果畫面上
+    // 還留著先前的失敗提示，順便收掉，避免使用者誤以為問題還沒解決
+    function reportFirestoreWrite(promise, contextLabel) {
+        return promise.then(() => {
+            hideCloudSyncBanner();
+        }).catch(e => {
+            console.warn(`雲端儲存失敗（${contextLabel}）`, e);
+            showCloudSyncBanner(buildCloudSyncErrorMessage(contextLabel, e, 'write'));
+        });
+    }
+
     /* ---- Firestore 讀寫：路徑 users/{uid}/portfolio_data/{holdings|settings|memory}，
        每位使用者只能讀寫自己 uid 底下的文件（由上面第 4 點的安全規則保證） ---- */
     function userDocRef(docName) {
@@ -453,8 +508,10 @@
         } catch (e) {
             readFailed = true;
             console.warn('雲端資料讀取失敗，這次保留畫面上既有的資料、不會被空白資料覆蓋，請重新整理再試一次', e);
+            showCloudSyncBanner(buildCloudSyncErrorMessage('讀取持股與設定', e, 'read'));
         }
 
+        if (!readFailed) hideCloudSyncBanner(); // 這次讀取成功，收掉可能殘留的舊錯誤提示
         if (readFailed) return; // appData／feeDiscount／API 金鑰／記憶庫全部維持原樣，不去動它
 
         // 只有在「這次讀取確實成功」的前提下，才逐欄位套用雲端資料；欄位本身沒有回傳值（例如帳號
@@ -510,7 +567,7 @@
 
     function persistHoldings() {
         if (!currentUser || !fbDb) return;
-        userDocRef('holdings').set({
+        reportFirestoreWrite(userDocRef('holdings').set({
             cash: appData.cash,
             stocks: appData.stocks,
             watchlist: appData.watchlist,
@@ -519,17 +576,17 @@
             priceAlerts,
             targetAllocation,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }).catch(e => console.warn('雲端儲存失敗（持股資料），資料先保留在畫面上，可以再按一次動作重試', e));
+        }), '持股與現金資料');
     }
 
     // 已實現損益流水帳單獨存放在 trade_history 文件，跟 holdings 分開，平倉歸檔／刪除誤填紀錄
     // 都只會動這份文件，不會影響到目前的持股與現金資料
     function persistTradeHistory() {
         if (!currentUser || !fbDb) return;
-        userDocRef('trade_history').set({
+        reportFirestoreWrite(userDocRef('trade_history').set({
             trades: tradeHistory,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }).catch(e => console.warn('雲端儲存失敗（已實現損益流水帳），資料先保留在畫面上，可以再按一次動作重試', e));
+        }), '已實現損益流水帳');
     }
 
     // 注意：這裡改用 { merge: true }，只更新這幾個欄位、不會整份文件覆蓋掉——避免哪天有其他
@@ -537,19 +594,19 @@
     // 文件裡時，被這裡的存檔操作不小心整份蓋掉、悄悄遺失同意紀錄
     function persistSettings() {
         if (!currentUser || !fbDb) return;
-        userDocRef('settings').set({
+        reportFirestoreWrite(userDocRef('settings').set({
             openRouterApiKey: openRouterApiKeyCache,
             emailJsConfig,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }, { merge: true }).catch(e => console.warn('雲端儲存失敗（個人設定）', e));
+        }, { merge: true }), '個人設定');
     }
 
     function persistMemory() {
         if (!currentUser || !fbDb) return;
-        userDocRef('memory').set({
+        reportFirestoreWrite(userDocRef('memory').set({
             history: summaryHistoryCache,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }).catch(e => console.warn('雲端儲存失敗（記憶庫）', e));
+        }), '記憶庫');
     }
 
     /* ========================================================================
