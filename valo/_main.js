@@ -64,16 +64,16 @@
             fbAuth = firebase.auth();
             fbDb = firebase.firestore();
 
-            // 修復「Failed to get document because the client is offline.」硬性失敗：
+            // 降低「Failed to get document because the client is offline.」硬性失敗的機率：
             // Firestore 預設的 WebChannel 串流連線在某些網路環境（公司/校園防火牆、部分廣告攔截
-            // 外掛、不穩定的行動網路）會被擋下或誤判成離線，即使裝置實際上有網路，.get() 也會
-            // 立刻丟出「client is offline」而不是重試。這裡做兩件事降低這個情況發生的機率：
-            // 1. experimentalAutoDetectLongPolling：自動偵測是否需要改用長輪詢 (long polling)
-            //    取代 WebChannel streaming，繞開會攔截串流連線的網路環境。
-            // 2. enablePersistence：開啟瀏覽器本機 IndexedDB 離線快取，讓 Firestore 在真的偵測到
-            //    離線時，能自動改用「上一次成功讀到的雲端資料快取」回應，而不是直接對 .get() 拋出
-            //    例外——這樣即使暫時離線，畫面上也不會突然被清空，而是繼續顯示最後一次同步成功的
-            //    持股與現金（等網路恢復，下一次讀取會自動換上真正最新的雲端資料）。
+            // 外掛、不穩定的行動網路）會被擋下或誤判成離線，即使裝置實際上有網路。
+            // experimentalAutoDetectLongPolling：自動偵測是否需要改用長輪詢 (long polling)
+            // 取代 WebChannel streaming，繞開會攔截串流連線的網路環境。
+            // enablePersistence：開啟瀏覽器本機 IndexedDB 離線快取——注意這只是讓 SDK「有能力」
+            // 在真的離線時透明使用快取，實際讀取仍然一律用預設的 .get()（網路優先，找不到伺服器
+            // 才自動退回快取），程式碼裡不會有任何地方手動強制指定 { source: 'cache' }，
+            // 避免本機根本沒有快取文件時，反而自己製造出「Failed to get document from cache」
+            // 這種讀取失敗。
             try {
                 fbDb.settings({ experimentalAutoDetectLongPolling: true, merge: true });
             } catch (e) {
@@ -528,7 +528,7 @@
         if (isPermission) {
             hint = '最可能的原因：Firebase Console 的 Firestore「安全規則」尚未正確設定（或還停在測試模式、已經到期），導致已登入的帳號也被拒絕讀寫自己的資料。請到 Firebase Console →「Firestore Database」→「規則」，貼上 index.html 開頭 Firebase 區塊註解裡的規則後按「發布」。';
         } else if (isOffline) {
-            hint = '最可能的原因：裝置目前沒有網路連線、或連線被中斷（部分公司／校園網路、廣告攔截外掛也可能誤擋 Firestore 的連線）。這個網頁已經開啟本機離線快取，若之前成功同步過，畫面會先顯示上次快取的資料；請確認網路狀態後重新整理頁面，讓系統重新抓取最新雲端資料。';
+            hint = '最可能的原因：裝置目前沒有網路連線、或連線被中斷（部分公司／校園網路、廣告攔截外掛也可能誤擋 Firestore 的連線）。這個網頁已經開啟本機離線快取（enablePersistence）＋長輪詢自動偵測，若之前成功同步過，SDK 會自動改用上次的快取；請確認網路狀態後重新整理頁面，讓系統重新抓取最新雲端資料。';
         } else {
             hint = '請重新整理頁面再試一次；如果持續發生，請檢查 Firebase 專案設定（firebaseConfig）與 Firestore 安全規則是否正確。';
         }
@@ -546,22 +546,6 @@
         });
     }
 
-    // 讀取 Firestore 文件時的離線保險機制：先照預設方式讀（有網路就直接讀伺服器最新資料；
-    // 如果 initFirebase() 裡的 enablePersistence 有成功啟用，SDK 在偵測到離線時本來就會
-    // 自動改用本機快取，不太需要走到 catch）。萬一還是被判定成「client is offline」這類
-    // 離線相關錯誤，這裡再明確試一次「只讀本機快取」（{ source: 'cache' }），盡量把上一次
-    // 成功同步過的資料撈回來，而不是讓使用者一時網路不穩就整批被當成「沒有資料」。
-    async function getDocWithOfflineFallback(ref) {
-        try {
-            return await ref.get();
-        } catch (e) {
-            const isOfflineError = (e && e.code === 'unavailable') || /offline/i.test((e && e.message) || '');
-            if (!isOfflineError) throw e;
-            console.warn('Firestore 線上讀取失敗（判定為離線相關錯誤），改嘗試讀取本機快取', e);
-            return await ref.get({ source: 'cache' }); // 本機若也沒有快取，一樣會拋出例外，交給外層 catch 處理
-        }
-    }
-
     /* ---- Firestore 讀寫：路徑 users/{uid}/portfolio_data/{holdings|settings|memory}，
        每位使用者只能讀寫自己 uid 底下的文件（由上面第 4 點的安全規則保證） ---- */
     function userDocRef(docName) {
@@ -573,6 +557,14 @@
     // 覆蓋掉畫面上已經有的持股、觀望股票、記憶庫紀錄——寧可這次先保留原本的資料，讓使用者重新整理再試一次，
     // 也不要讓一次暫時性的讀取失敗，變成使用者存了很久的真實持股紀錄被清空、甚至被後續的
     // persistHoldings() 用空白資料覆蓋掉雲端上原本的正確紀錄。
+    //
+    // 讀取方式：這裡一律使用 Firestore 預設的 .get()（不帶任何 source 參數），也就是「網路優先，
+    // 找伺服器要最新資料；只有在 SDK 自己偵測到裝置真的離線時，才會透明退回本機快取」。
+    // 程式碼裡完全不會手動強制指定 { source: 'cache' } 去只讀本機快取——那樣做的問題是，只要
+    // 這個瀏覽器剛好還沒有任何本機快取（例如全新裝置第一次登入、或分頁沒開多久），Firestore
+    // 就會直接丟出「Failed to get document from cache」而整批判定成讀取失敗，即使裝置其實
+    // 有網路、伺服器上真的有資料可以拿。離線時的自動退回快取已經交給 initFirebase() 裡的
+    // enablePersistence 處理，這裡不需要、也不應該再手動疊加一層 cache-only 的讀取邏輯。
     async function loadUserDataFromCloud() {
         // appData 在登出時會被徹底清成 null（見 clearAllUserDataOnLogout）；重新登入時，
         // 這裡要先給一個安全的空白預設值，避免底下任何一個分支結束後 appData 還是 null，
@@ -584,10 +576,10 @@
         let readFailed = false;
         try {
             const [holdingsSnap, settingsSnap, memorySnap, tradeHistorySnap] = await Promise.all([
-                getDocWithOfflineFallback(userDocRef('holdings')),
-                getDocWithOfflineFallback(userDocRef('settings')),
-                getDocWithOfflineFallback(userDocRef('memory')),
-                getDocWithOfflineFallback(userDocRef('trade_history'))
+                userDocRef('holdings').get(),
+                userDocRef('settings').get(),
+                userDocRef('memory').get(),
+                userDocRef('trade_history').get()
             ]);
             holdingsExists = holdingsSnap.exists;
             if (holdingsSnap.exists) holdingsData = holdingsSnap.data();
