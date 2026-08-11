@@ -1985,18 +1985,22 @@
         if (keyInput) keyInput.value = '';
         // 登出時清空 localStorage：公開市場資料快取（公司名冊等）、上一位使用者可能殘留的任何
         // 暫存痕跡都要清乾淨，確保共用裝置換帳號登入不會外洩上一位使用者的資料。
-        // 但「valo_disclaimer_agreed_<uid>」這組帳號綁定的免責聲明同意紀錄要刻意保留下來——
-        // 這是本地端的第二道保險（見 handleAuthStateChanged 裡的 hasAgreed 判斷），如果每次
-        // 登出都整批清掉，會直接讓「同一個帳號不用每次都重新勾選」這件事失效，下次同一個帳號
-        // 重新登入、剛好雲端讀取又不順的話，一樣會被迫重新看一次免責聲明。因為這組 key 本身
-        // 是用 uid 當後綴、天生帳號綁定，換成別的 Google 帳號登入時 key 對不上，還是會正常
-        // 重新觸發強制閘門，不會有資料外洩或跳過別人同意紀錄的風險。
+        // 但有兩組「帳號綁定（用 uid 當 key 後綴）」的本地紀錄要刻意保留下來：
+        // 1. valo_disclaimer_agreed_<uid>：本地端的免責聲明同意紀錄第二道保險（見
+        //    handleAuthStateChanged 裡的 hasAgreed 判斷），每次登出都清掉會讓「同一帳號
+        //    不用每次都重新勾選」這件事失效。
+        // 2. valo_local_backup_<uid>：雙軌備份機制的本地端持股／API 金鑰備份（見
+        //    writeLocalBackup／readLocalBackup），如果登出就清掉，下次同一帳號重新登入、
+        //    剛好雲端連線又不順的話，就完全失去本地 fallback 可用，違背這個機制原本要達成
+        //    的「重新整理或重新登入後資料依然完好如初」目標。
+        // 這兩組 key 本身都是用 uid 當後綴、天生帳號綁定，換成別的 Google 帳號登入時 key
+        // 對不上，不會有資料外洩或誤用到別人資料的風險。
         try {
-            const disclaimerPrefix = 'valo_disclaimer_agreed_';
+            const preservedPrefixes = ['valo_disclaimer_agreed_', 'valo_local_backup_'];
             const preserved = {};
             for (let i = 0; i < localStorage.length; i++) {
                 const k = localStorage.key(i);
-                if (k && k.indexOf(disclaimerPrefix) === 0) preserved[k] = localStorage.getItem(k);
+                if (k && preservedPrefixes.some(p => k.indexOf(p) === 0)) preserved[k] = localStorage.getItem(k);
             }
             localStorage.clear();
             Object.keys(preserved).forEach(k => localStorage.setItem(k, preserved[k]));
@@ -2278,6 +2282,56 @@
         });
     }
 
+    /* ---- 雙軌備份機制（LocalStorage + Firebase）：Firestore 連線不時會出現 client is offline
+       或其他暫時性錯誤，導致雲端寫入／讀取失敗。為了讓使用者的 API 金鑰與持股資料「本地優先」，
+       每次寫入雲端的同時，一定同步強制寫入瀏覽器的 localStorage 作為備份；登入或初始化時如果
+       雲端讀取失敗，也一定會自動改讀這份本地備份來還原畫面，絕對不會讓畫面直接清空成空白狀態。
+       備份 key 依帳號 uid 區隔（valo_local_backup_<uid>），避免同一台裝置切換不同帳號時
+       互相污染彼此的資料。 ---- */
+    function localBackupKey(uid) {
+        return `valo_local_backup_${uid}`;
+    }
+
+    // 把目前記憶體裡「權威」的持股／現金／觀望清單／個人設定／API 金鑰整包寫進 localStorage。
+    // 刻意設計成同步、不依賴任何網路請求——呼叫這個函式的當下就已經完成備份，就算緊接著的
+    // Firebase 雲端寫入失敗（離線、規則錯誤、逾時皆然），這份本地備份也已經先落地了。
+    function writeLocalBackup() {
+        if (!currentUser || !appData) return;
+        try {
+            const backup = {
+                cash: appData.cash,
+                stocks: appData.stocks,
+                watchlist: appData.watchlist,
+                feeDiscount,
+                cashAlertThreshold,
+                priceAlerts,
+                targetAllocation,
+                openRouterApiKey: openRouterApiKeyCache,
+                emailJsConfig,
+                savedAt: Date.now()
+            };
+            localStorage.setItem(localBackupKey(currentUser.uid), JSON.stringify(backup));
+        } catch (e) {
+            // localStorage 可能已滿、或瀏覽器隱私模式封鎖寫入——本地備份失敗不影響主流程，
+            // 只在 console 留記錄，不打斷使用者當下的操作
+            console.warn('本地備份寫入失敗（localStorage 可能已滿或被瀏覽器封鎖）', e);
+        }
+    }
+
+    // 讀取指定帳號的本地備份；格式異常或不存在時回傳 null，交給呼叫端決定 fallback 行為
+    function readLocalBackup(uid) {
+        try {
+            const raw = localStorage.getItem(localBackupKey(uid));
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') return null;
+            return parsed;
+        } catch (e) {
+            console.warn('本地備份讀取失敗，忽略這份備份，改用目前畫面上的資料', e);
+            return null;
+        }
+    }
+
     /* ---- Firestore 讀寫：路徑 users/{uid}/portfolio_data/{holdings|settings|memory}，
        每位使用者只能讀寫自己 uid 底下的文件（由上面第 4 點的安全規則保證） ---- */
     function userDocRef(docName) {
@@ -2298,6 +2352,7 @@
         let holdingsData = null, settingsData = null, memoryData = null, tradeHistoryData = null;
         let holdingsExists = false;
         let readFailed = false;
+        let readError = null; // 記錄失敗原因，讓下面 if (readFailed) 區塊也能組出技術細節訊息
         try {
             const [holdingsSnap, settingsSnap, memorySnap, tradeHistorySnap] = await Promise.all([
                 userDocRef('holdings').get(),
@@ -2312,11 +2367,54 @@
             if (tradeHistorySnap.exists) tradeHistoryData = tradeHistorySnap.data();
         } catch (e) {
             readFailed = true;
-            console.warn('雲端資料讀取失敗，這次保留畫面上既有的資料、不會被空白資料覆蓋，請重新整理再試一次', e);
-            showCloudSyncBanner(buildCloudSyncErrorMessage('讀取持股與設定', e, 'read'));
+            readError = e;
+            console.warn('雲端資料讀取失敗，改嘗試從本地備份還原資料，請重新整理或稍後再試一次', e);
         }
 
-        if (readFailed) return; // appData／feeDiscount／API 金鑰／記憶庫全部維持原樣，不去動它
+        if (readFailed) {
+            // 雲端讀取失敗（含 client is offline）：不要把畫面清空，改成自動從 localStorage
+            // 找這個帳號的本地備份來還原，讓使用者重新整理或重新登入後資料依然完好如初；
+            // 等下次雲端連線恢復、任何一次寫入動作都會自動把最新狀態同步回 Firestore。
+            const backup = readLocalBackup(currentUser.uid);
+            if (backup) {
+                appData = {
+                    cash: typeof backup.cash === 'number' ? backup.cash : appData.cash,
+                    stocks: Array.isArray(backup.stocks) ? backup.stocks : appData.stocks,
+                    watchlist: Array.isArray(backup.watchlist) ? backup.watchlist : appData.watchlist
+                };
+                if (typeof backup.feeDiscount === 'number' && backup.feeDiscount > 0 && backup.feeDiscount <= 1) {
+                    feeDiscount = backup.feeDiscount;
+                }
+                if (typeof backup.cashAlertThreshold === 'number' && backup.cashAlertThreshold >= 0) {
+                    cashAlertThreshold = backup.cashAlertThreshold;
+                }
+                if (backup.priceAlerts && typeof backup.priceAlerts === 'object') {
+                    priceAlerts = backup.priceAlerts;
+                }
+                if (backup.targetAllocation && typeof backup.targetAllocation === 'object') {
+                    targetAllocation = backup.targetAllocation;
+                }
+                if (backup.openRouterApiKey) {
+                    openRouterApiKeyCache = backup.openRouterApiKey;
+                }
+                if (backup.emailJsConfig && typeof backup.emailJsConfig === 'object') {
+                    emailJsConfig = Object.assign({ serviceId: '', templateId: '', publicKey: '' }, backup.emailJsConfig);
+                }
+                const feeInput = document.getElementById('in-fee-discount');
+                if (feeInput) feeInput.value = Math.round(feeDiscount * 100);
+                const thresholdInput = document.getElementById('in-cash-alert-threshold');
+                if (thresholdInput) thresholdInput.value = cashAlertThreshold || '';
+                const keyInput = document.getElementById('openrouter-api-key');
+                if (keyInput) keyInput.value = openRouterApiKeyCache;
+                const savedAtText = backup.savedAt ? new Date(backup.savedAt).toLocaleString('zh-TW') : '未知時間';
+                showCloudSyncBanner(`雲端資料暫時讀取不到，已自動改用本機備份還原畫面（備份時間：${savedAtText}）。等雲端連線恢復後，資料會在下次操作時自動重新同步。${buildCloudSyncErrorMessage('讀取持股與設定', readError, 'read')}`);
+            } else {
+                // 這個帳號在這台裝置上完全沒有本地備份可用（例如第一次用這台裝置登入），
+                // 只能維持目前畫面上既有的資料（多半就是初始空白狀態），並顯示雲端讀取失敗的提示
+                showCloudSyncBanner(buildCloudSyncErrorMessage('讀取持股與設定', readError, 'read'));
+            }
+            return; // 不論有沒有找到本地備份，這次都直接結束，不再往下套用（本來就沒讀到的）雲端資料
+        }
         hideCloudSyncBanner(); // 這次讀取成功，收掉先前可能顯示的失敗提示（如果有的話）
 
         // 只有在「這次讀取確實成功」的前提下，才逐欄位套用雲端資料；欄位本身沒有回傳值（例如帳號
@@ -2368,10 +2466,15 @@
         if (tradeHistoryData && Array.isArray(tradeHistoryData.trades)) {
             tradeHistory = tradeHistoryData.trades;
         }
+
+        // 這次雲端讀取成功，把最新狀態立刻覆寫一份到本地備份，確保本地備份不會停留在
+        // 舊資料——下次萬一雲端連線又暫時失敗，才能 fallback 到「這次成功讀到的最新版本」
+        writeLocalBackup();
     }
 
     function persistHoldings() {
         if (!currentUser || !fbDb) return;
+        writeLocalBackup(); // 本地優先：不管雲端寫入結果如何，先同步強制寫入 localStorage 備份
         reportFirestoreWrite(userDocRef('holdings').set({
             cash: appData.cash,
             stocks: appData.stocks,
@@ -2399,6 +2502,7 @@
     // 文件裡時，被這裡的存檔操作不小心整份蓋掉、悄悄遺失同意紀錄
     function persistSettings() {
         if (!currentUser || !fbDb) return;
+        writeLocalBackup(); // 本地優先：API 金鑰等個人設定同樣先同步強制寫入 localStorage 備份
         reportFirestoreWrite(userDocRef('settings').set({
             openRouterApiKey: openRouterApiKeyCache,
             emailJsConfig,
