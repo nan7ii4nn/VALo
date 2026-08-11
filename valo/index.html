@@ -3176,6 +3176,22 @@
     // 依「雙軌制」估算某檔持股的預估股利：官方公告優先（perShareCash > 0 才算數，避免揭露 0
     // 元股利的紀錄被誤判成「有公告」），沒有官方公告資料才退而求其次，用歷史殖利率 × 持有市值估算。
     // 兩軌都沒有資料就回傳 null，呼叫端要自行處理「無法估算」的顯示情況。
+    // 常見台股 ETF／個股的配息頻率字典：季配（一年配四次或半年配一次等高頻率型態）、
+    // 年配（一年配一次）、月配（每月配一次）。清單以外的 ETF，交給 isETF() 判斷後給一個
+    // 合理的市場常見預設（近年台股高股息 ETF 主流是季配）；清單以外的一般個股則預設年配
+    // （多數傳統上市櫃公司是股東會決議後一年配發一次）。
+    const DIVIDEND_FREQUENCY_MAP = {
+        '0050': '季配', '006208': '年配', '0056': '季配', '00878': '季配',
+        '00713': '季配', '00929': '月配', '00919': '季配', '00939': '月配',
+        '00940': '月配', '00915': '季配', '00918': '月配', '00934': '季配',
+        '0051': '年配', '0052': '年配'
+    };
+    function getDividendFrequencyLabel(stock) {
+        if (DIVIDEND_FREQUENCY_MAP[stock.symbol]) return DIVIDEND_FREQUENCY_MAP[stock.symbol];
+        if (isETF(stock.symbol)) return '季配';
+        return '年配';
+    }
+
     // 常見台股 ETF 的合理殖利率預估區間備援表：當官方公告（TWSE 開放資料）與歷史殖利率
     // （BWIBBU 資料）兩軌都抓不到資料時（API 逾時、被擋、資料來源本身暫時缺漏等），
     // 用這裡查表得到的數字概算，讓畫面與「一鍵股利入帳」按鈕都能正常運作，不會整片卡死在
@@ -3188,38 +3204,58 @@
     };
     // 查不到代號專屬預估值的一般個股或 ETF，用這個保守基準值當最後備援
     const DEFAULT_FALLBACK_DIVIDEND_YIELD = 0.04;
+    // 官方公告的董事會決議日在這個天數之內，視為「當期／最新一期」的新鮮資料；超過就視為
+    // 舊資料，只能拿來當作「上一季／去年同期」的參考基準（約略涵蓋一整個季配週期再留一點餘裕）
+    const DIVIDEND_ANNOUNCE_FRESH_DAYS = 200;
 
     function estimateDividendForStock(stock) {
+        const freqLabel = getDividendFrequencyLabel(stock);
         const announce = dividendAnnounceMap[stock.symbol];
+
         if (announce && announce.perShareCash > 0) {
+            // 判斷這筆官方公告是否還算「當期」：董事會決議日在近 200 天內視為當期新鮮資料；
+            // 超過這個範圍，代表證交所資料庫裡還沒有更新一期的公告（當期尚未召開董事會決議、
+            // 或資料尚未揭露），這時改標示成「上一期參考」，金額依然是實際發放過的官方數字，
+            // 只是提醒使用者這不是「當期最新」公告，避免誤判成剛公告的最新配息。
+            const daysSinceBoard = announce.boardDate ? (Date.now() - announce.boardDate.getTime()) / 86400000 : null;
+            const isFresh = daysSinceBoard !== null && daysSinceBoard <= DIVIDEND_ANNOUNCE_FRESH_DAYS;
+            const periodText = `${announce.yearLabel ? announce.yearLabel + '年度' : ''}${announce.periodLabel || ''}`;
             return {
-                track: 'official',
+                track: isFresh ? 'official' : 'official_prior',
+                freqLabel,
                 perShare: announce.perShareCash,
                 totalAmount: Math.round(announce.perShareCash * stock.shares),
-                meta: `${announce.yearLabel ? announce.yearLabel + '年度' : ''}${announce.periodLabel || ''}官方公告`
+                meta: isFresh
+                    ? `${periodText || ''}官方公告`
+                    : `當期官方公告尚未發布，改參考上一期（${periodText || '前期'}）實際配息金額`
             };
         }
+
         const bw = bwibbuMap[stock.symbol];
         if (bw && bw.yield) {
             const marketVal = (stock.price || stock.cost) * stock.shares;
             return {
                 track: 'historical',
+                freqLabel,
                 perShare: null,
                 totalAmount: Math.round(marketVal * (bw.yield / 100)),
                 meta: `依歷史殖利率 ${bw.yield.toFixed(2)}% 估算`
             };
         }
-        // 兩軌官方／歷史資料都抓不到：不要直接判定「無法估算」，改用預估備援機制——
-        // 常見 ETF 查表給合理殖利率區間，其餘一般個股/ETF 用保守的 4% 預設值概算，
-        // 只要這檔持股至少有股價或成本可以算出市值，就一定能給出一個可用的預估金額。
+
+        // 官方公告與歷史殖利率兩軌都抓不到：不要直接判定「無法估算」，改用智慧預估備援機制——
+        // 常見 ETF 查表給合理殖利率區間，其餘一般個股/ETF 用保守的 4% 預設值概算，只要這檔
+        // 持股至少有股價或成本可以算出市值，就一定能給出一個可用的預估金額，讓右側試算金額與
+        // 「一鍵股利入帳」按鈕正常顯示、正常運作。
         const marketVal = (stock.price || stock.cost) * stock.shares;
         if (marketVal > 0) {
             const fallbackYield = DEFAULT_DIVIDEND_YIELD_MAP[stock.symbol] || DEFAULT_FALLBACK_DIVIDEND_YIELD;
             return {
                 track: 'fallback',
+                freqLabel,
                 perShare: null,
                 totalAmount: Math.round(marketVal * fallbackYield),
-                meta: `官方公告與歷史殖利率暫時都讀不到，改用預估殖利率 ${(fallbackYield * 100).toFixed(1)}% 概算（僅供參考）`
+                meta: `【預估值：參考上一季/去年同期的配息】官方公告與歷史殖利率暫時都讀取不到，改用預估殖利率 ${(fallbackYield * 100).toFixed(1)}% 概算（僅供參考）`
             };
         }
         // 連市值都算不出來（沒有股價、也沒有成本可用）時，才是真的完全無法估算
@@ -3759,10 +3795,14 @@
         if (avgEl) avgEl.innerText = `NT$ ${fmtNum(annualTotal / 12)}`;
 
         listEl.innerHTML = rows.map(({ stock, est }) => {
+            // 配息頻率標籤：不管這檔股票是否算得出預估金額，都先顯示【季配】【年配】【月配】，
+            // 讓使用者一眼看出這檔持股大概多久領一次息
+            const freqTag = `<span class="text-[10px] font-bold text-gray-400 border border-gray-200 rounded-full px-2 py-0.5 whitespace-nowrap">【${getDividendFrequencyLabel(stock)}】</span>`;
             if (!est) {
                 return `<div class="py-4">
-                    <div class="flex justify-between items-center text-xs">
+                    <div class="flex justify-between items-center text-xs gap-2">
                         <div class="font-bold text-gray-800">${stock.symbol} ${stock.name}</div>
+                        ${freqTag}
                         <span class="diag-badge">[無法估算]</span>
                     </div>
                     <p class="text-[11px] text-gray-400 mt-1">目前抓不到官方公告，也沒有歷史殖利率資料可供估算。</p>
@@ -3770,12 +3810,15 @@
             }
             const badge = est.track === 'official'
                 ? `<span class="diag-badge bear">[已公告]</span>`
+                : est.track === 'official_prior'
+                ? `<span class="diag-badge">[上一期參考]</span>`
                 : est.track === 'historical'
                 ? `<span class="diag-badge">[歷史推估]</span>`
                 : `<span class="diag-badge">[預估值]</span>`;
             return `<div class="py-4">
                 <div class="flex justify-between items-center text-xs gap-3">
                     <div class="font-bold text-gray-800">${stock.symbol} ${stock.name}</div>
+                    ${freqTag}
                     ${badge}
                     <div class="text-gray-500 flex-1 text-right">${escapeHtml(est.meta)}</div>
                     <div class="font-bold text-gray-900" style="font-family:'IBM Plex Mono',monospace;">NT$ ${fmtNum(est.totalAmount)}</div>
