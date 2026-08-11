@@ -1802,14 +1802,22 @@
             // 處理——讀取失敗時安全地保留畫面上既有的資料，不清空、不報錯中斷，只在畫面上
             // 用雲端同步橫幅溫和提示。
             //
-            // experimentalAutoDetectLongPolling 保留：這個設定跟離線快取無關，是連線「傳輸層」
-            // 的選項，讓 SDK 自動判斷要不要改用長輪詢 (long polling) 取代 WebSocket/WebChannel
-            // streaming，用來繞開會攔截串流連線的網路環境（公司/校園防火牆、部分廣告攔截外掛），
-            // 純粹是連線方式的選擇，不會讓讀取行為變成依賴本機快取。
+            // 強制使用 Long Polling（experimentalForceLongPolling）：無痕視窗、部分行動網路、
+            // 公司／校園防火牆、廣告攔截外掛等環境，經常會攔截或中斷 Firestore 預設用的
+            // WebSocket / WebChannel streaming 連線，導致 SDK 誤判自己處於離線狀態，即使
+            // 裝置實際上有網路，也會持續跳出「client is offline」的錯誤。無痕模式尤其明顯，
+            // 因為它會限制第三方 cookie／部分背景連線行為，讓原本用來「自動偵測要不要改走
+            // 長輪詢」的 experimentalAutoDetectLongPolling 判斷失準、仍然嘗試用會被擋的
+            // streaming 連線。這裡改成直接「強制」全程使用標準 HTTP 長輪詢，不再嘗試
+            // WebSocket，犧牲一點點連線效率，換取在各種受限網路環境（含無痕視窗）下都能
+            // 穩定連上 Firestore、不會被誤判離線。
+            //
+            // 注意：experimentalForceLongPolling 與 experimentalAutoDetectLongPolling
+            // 不能同時設定為 true（互斥），這裡只保留前者。
             try {
-                fbDb.settings({ experimentalAutoDetectLongPolling: true, merge: true });
+                fbDb.settings({ experimentalForceLongPolling: true, merge: true });
             } catch (e) {
-                console.warn('Firestore settings（長輪詢自動偵測）套用失敗，不影響基本功能', e);
+                console.warn('Firestore settings（強制長輪詢）套用失敗，不影響基本功能', e);
             }
 
             // 用「直接雙擊開檔案」（網址列會是 file://...）打開時，瀏覽器通常不允許網頁使用
