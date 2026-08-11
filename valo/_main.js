@@ -25,7 +25,9 @@
           「拒絕所有讀寫」，就算帳號正常登入、程式碼完全正常，也一樣讀不到、存不進去。
           請務必手動貼上面這段規則並發布，不要依賴測試模式的預設值。
           （這個網頁本身也內建了讀寫失敗提示：只要 Firestore 讀取或寫入失敗，畫面最上方會立刻
-          跳出一條深色橫幅告訴你失敗原因，不會再像以前一樣只悄悄印在瀏覽器 console 裡看不到。）
+          跳出一條深色橫幅告訴你失敗原因，不會再像以前一樣只悄悄印在瀏覽器 console 裡看不到。
+          另外這個版本沒有啟用 Firestore 的離線快取（enablePersistence），一律走標準線上連線，
+          離線時無法顯示先前資料，需要有網路連線才能正常讀寫。）
        5. 「Authentication」→「Settings」→「已授權網域」，把你實際會用來打開這個網頁的網域也加進去
           （例如你之後把這個檔案架設到自己的網站時的網域；本機用 file:// 開啟 Google 登入彈窗可能會被瀏覽器擋，
           建議改用 email/密碼登入，或先把檔案放到有網域的靜態網站託管服務上）。
@@ -64,27 +66,24 @@
             fbAuth = firebase.auth();
             fbDb = firebase.firestore();
 
-            // 降低「Failed to get document because the client is offline.」硬性失敗的機率：
-            // Firestore 預設的 WebChannel 串流連線在某些網路環境（公司/校園防火牆、部分廣告攔截
-            // 外掛、不穩定的行動網路）會被擋下或誤判成離線，即使裝置實際上有網路。
-            // experimentalAutoDetectLongPolling：自動偵測是否需要改用長輪詢 (long polling)
-            // 取代 WebChannel streaming，繞開會攔截串流連線的網路環境。
-            // enablePersistence：開啟瀏覽器本機 IndexedDB 離線快取——注意這只是讓 SDK「有能力」
-            // 在真的離線時透明使用快取，實際讀取仍然一律用預設的 .get()（網路優先，找不到伺服器
-            // 才自動退回快取），程式碼裡不會有任何地方手動強制指定 { source: 'cache' }，
-            // 避免本機根本沒有快取文件時，反而自己製造出「Failed to get document from cache」
-            // 這種讀取失敗。
+            // 注意：這裡刻意「不」呼叫 fbDb.enablePersistence()／enableIndexedDbPersistence()。
+            // 先前版本曾經加上這個離線快取機制，但它在部分環境（例如同時開了多個分頁、瀏覽器的
+            // 隱私模式限制 IndexedDB、或裝置的 IndexedDB 狀態本身有問題）反而會讓 SDK 卡在
+            // 「以為自己離線」的狀態，導致原本正常有網路連線時也跳出「Failed to get document
+            // because the client is offline.」這種錯誤。移除這段之後，Firestore 保持標準的
+            // 純線上連線模式：每次讀取都直接向伺服器要資料，不強迫依賴本機快取，行為更單純、
+            // 也更好預期。若真的需要離線也能用的快取功能，之後要重新啟用的話，記得同時測試
+            // 「開多個分頁」跟「行動裝置切換前後台」這兩種情境，確認不會又卡在離線誤判。
+            //
+            // experimentalAutoDetectLongPolling 保留：這個設定跟離線快取無關，是連線「傳輸層」
+            // 的選項，讓 SDK 自動判斷要不要改用長輪詢 (long polling) 取代 WebSocket/WebChannel
+            // streaming，用來繞開會攔截串流連線的網路環境（公司/校園防火牆、部分廣告攔截外掛），
+            // 純粹是連線方式的選擇，不會讓讀取行為變成依賴本機快取。
             try {
                 fbDb.settings({ experimentalAutoDetectLongPolling: true, merge: true });
             } catch (e) {
                 console.warn('Firestore settings（長輪詢自動偵測）套用失敗，不影響基本功能', e);
             }
-            fbDb.enablePersistence({ synchronizeTabs: true }).catch(e => {
-                // failed-precondition：同時開了多個分頁且不支援多分頁同步時常見；unimplemented：
-                // 瀏覽器不支援 IndexedDB（例如某些隱私瀏覽模式）。兩種情況都只是離線快取用不了，
-                // 不影響正常有網路時的讀寫功能，這裡單純記錄一下，不用打斷使用者。
-                console.warn('Firestore 離線快取（enablePersistence）啟用失敗，離線時可能無法顯示快取資料，但正常連線時完全不受影響', e && e.code ? e.code : e);
-            });
 
             // 用「直接雙擊開檔案」（網址列會是 file://...）打開時，瀏覽器通常不允許網頁使用
             // indexedDB / localStorage 來源隔離儲存，Firebase Auth 預設的持久化機制會直接噴錯，
@@ -166,6 +165,9 @@
          強制閘門，不會有「別人同意過我就自動跳過」的外洩風險。
        - 只要雲端確認同意、或本地快取顯示同意過，兩者任一為真就跳過強制閘門，讓同一個帳號
          之後不管是重新整理、重新登入、或剛好那次雲端連線不穩，都不會被迫重複勾選。
+       （這組 localStorage key 跟上面移除的 Firestore enablePersistence 是兩件完全獨立的事：
+       這裡只是存一個小小的 true/false 布林值旗標，不是拿來快取整份持股資料，所以移除
+       enablePersistence 不會影響這個機制的效果。）
     ------------------------------------------------------------------------ */
     function disclaimerLocalKey(uid) {
         return 'valo_disclaimer_agreed_' + uid;
@@ -498,6 +500,8 @@
         if (fbAuth) await fbAuth.signOut();
     }
 
+    /* ---- Firestore 讀寫：路徑 users/{uid}/portfolio_data/{holdings|settings|memory}，
+       每位使用者只能讀寫自己 uid 底下的文件（由上面第 4 點的安全規則保證） ---- */
     /* ---- 雲端同步狀態橫幅：Firestore 讀取／寫入失敗時，不能只是 console.warn 悄悄吞掉——
        使用者完全看不到 console，會誤以為資料已經存好了，直到某天重新整理或換裝置登入才發現
        整批不見。這裡統一用一個固定在畫面最上層的橫幅顯示，並依錯誤類型（權限被拒／網路離線／
@@ -528,7 +532,7 @@
         if (isPermission) {
             hint = '最可能的原因：Firebase Console 的 Firestore「安全規則」尚未正確設定（或還停在測試模式、已經到期），導致已登入的帳號也被拒絕讀寫自己的資料。請到 Firebase Console →「Firestore Database」→「規則」，貼上 index.html 開頭 Firebase 區塊註解裡的規則後按「發布」。';
         } else if (isOffline) {
-            hint = '最可能的原因：裝置目前沒有網路連線、或連線被中斷（部分公司／校園網路、廣告攔截外掛也可能誤擋 Firestore 的連線）。這個網頁已經開啟本機離線快取（enablePersistence）＋長輪詢自動偵測，若之前成功同步過，SDK 會自動改用上次的快取；請確認網路狀態後重新整理頁面，讓系統重新抓取最新雲端資料。';
+            hint = '最可能的原因：裝置目前沒有網路連線、或連線被中斷（部分公司／校園網路、廣告攔截外掛也可能誤擋 Firestore 的連線）。請確認網路狀態後重新整理頁面再試一次；這個網頁沒有啟用離線快取，離線時無法顯示先前的資料，需要有網路連線才能讀寫。';
         } else {
             hint = '請重新整理頁面再試一次；如果持續發生，請檢查 Firebase 專案設定（firebaseConfig）與 Firestore 安全規則是否正確。';
         }
@@ -558,13 +562,8 @@
     // 也不要讓一次暫時性的讀取失敗，變成使用者存了很久的真實持股紀錄被清空、甚至被後續的
     // persistHoldings() 用空白資料覆蓋掉雲端上原本的正確紀錄。
     //
-    // 讀取方式：這裡一律使用 Firestore 預設的 .get()（不帶任何 source 參數），也就是「網路優先，
-    // 找伺服器要最新資料；只有在 SDK 自己偵測到裝置真的離線時，才會透明退回本機快取」。
-    // 程式碼裡完全不會手動強制指定 { source: 'cache' } 去只讀本機快取——那樣做的問題是，只要
-    // 這個瀏覽器剛好還沒有任何本機快取（例如全新裝置第一次登入、或分頁沒開多久），Firestore
-    // 就會直接丟出「Failed to get document from cache」而整批判定成讀取失敗，即使裝置其實
-    // 有網路、伺服器上真的有資料可以拿。離線時的自動退回快取已經交給 initFirebase() 裡的
-    // enablePersistence 處理，這裡不需要、也不應該再手動疊加一層 cache-only 的讀取邏輯。
+    // 讀取方式：一律使用 Firestore 預設的 .get()（不帶任何 source 參數，也沒有另外呼叫
+    // enablePersistence），單純向伺服器要最新資料，不強迫依賴本機快取。
     async function loadUserDataFromCloud() {
         // appData 在登出時會被徹底清成 null（見 clearAllUserDataOnLogout）；重新登入時，
         // 這裡要先給一個安全的空白預設值，避免底下任何一個分支結束後 appData 還是 null，
