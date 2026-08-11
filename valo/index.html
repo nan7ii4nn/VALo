@@ -20,7 +20,6 @@
 
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <!-- 動態趨勢圖表的滾輪縮放／拖曳平移：載入順序固定 chart.js → hammer.js → chartjs-plugin-zoom -->
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2"></script>
     <!-- 改用完整 D3 v7 套件（本來只載 d3-delaunay 子模組）：完整版一樣有 d3.Delaunay.from，
@@ -1805,12 +1804,8 @@
             // 處理——讀取失敗時安全地保留畫面上既有的資料，不清空、不報錯中斷，只在畫面上
             // 用雲端同步橫幅溫和提示。
             //
-            // 強制使用 Long Polling（experimentalForceLongPolling）：無痕視窗、部分行動網路、
-            // 公司／校園防火牆、廣告攔截外掛等環境，經常會攔截或中斷 Firestore 預設用的
-            // WebSocket / WebChannel streaming 連線，導致 SDK 誤判自己處於離線狀態，即使
-            // 裝置實際上有網路，也會持續跳出「client is offline」的錯誤。這裡改成直接「強制」
-            // 全程使用標準 HTTP 長輪詢，不再嘗試 WebSocket，換取在各種受限網路環境下都能
-            // 穩定連上 Firestore、不會被誤判離線。
+            // 強制使用 Long Polling：無痕視窗、行動網路、防火牆等環境常常攔截 WebSocket
+            // streaming，導致誤判離線。這裡強制全程走標準 HTTP 長輪詢。
             try {
                 fbDb.settings({ experimentalForceLongPolling: true, merge: true });
             } catch (e) {
@@ -1981,10 +1976,13 @@
         const keyInput = document.getElementById('openrouter-api-key');
         if (keyInput) keyInput.value = '';
         // 登出時清空 localStorage：公開市場資料快取（公司名冊等）、上一位使用者可能殘留的任何
-        // 暫存痕跡都要清乾淨。但有兩組「帳號綁定（用 uid 當 key 後綴）」的本地紀錄要保留：
-        // valo_disclaimer_agreed_<uid>（免責聲明同意紀錄）與 valo_local_backup_<uid>
-        // （雙軌備份機制的本地端持股／API 金鑰備份）——兩者都是 uid 綁定，換帳號登入時
-        // key 對不上，不會有資料外洩風險。
+        // 暫存痕跡都要清乾淨，確保共用裝置換帳號登入不會外洩上一位使用者的資料。
+        // 但「valo_disclaimer_agreed_<uid>」這組帳號綁定的免責聲明同意紀錄要刻意保留下來——
+        // 這是本地端的第二道保險（見 handleAuthStateChanged 裡的 hasAgreed 判斷），如果每次
+        // 登出都整批清掉，會直接讓「同一個帳號不用每次都重新勾選」這件事失效，下次同一個帳號
+        // 重新登入、剛好雲端讀取又不順的話，一樣會被迫重新看一次免責聲明。因為這組 key 本身
+        // 是用 uid 當後綴、天生帳號綁定，換成別的 Google 帳號登入時 key 對不上，還是會正常
+        // 重新觸發強制閘門，不會有資料外洩或跳過別人同意紀錄的風險。
         try {
             const preservedPrefixes = ['valo_disclaimer_agreed_', 'valo_local_backup_'];
             const preserved = {};
@@ -2272,9 +2270,6 @@
         });
     }
 
-    /* ---- 雙軌備份機制（LocalStorage + Firebase）：每次寫入雲端的同時，一定同步強制寫入
-       瀏覽器的 localStorage 作為備份；登入或初始化時如果雲端讀取失敗，也一定會自動改讀這份
-       本地備份來還原畫面，絕對不會讓畫面直接清空成空白狀態。備份 key 依帳號 uid 區隔。 ---- */
     function localBackupKey(uid) {
         return `valo_local_backup_${uid}`;
     }
@@ -2443,12 +2438,12 @@
             tradeHistory = tradeHistoryData.trades;
         }
 
-        writeLocalBackup(); // 這次雲端讀取成功，把最新狀態立刻覆寫一份到本地備份
+        writeLocalBackup();
     }
 
     function persistHoldings() {
         if (!currentUser || !fbDb) return;
-        writeLocalBackup(); // 本地優先：不管雲端寫入結果如何，先同步強制寫入 localStorage 備份
+        writeLocalBackup();
         reportFirestoreWrite(userDocRef('holdings').set({
             cash: appData.cash,
             stocks: appData.stocks,
@@ -2476,7 +2471,7 @@
     // 文件裡時，被這裡的存檔操作不小心整份蓋掉、悄悄遺失同意紀錄
     function persistSettings() {
         if (!currentUser || !fbDb) return;
-        writeLocalBackup(); // 本地優先：API 金鑰等個人設定同樣先同步強制寫入 localStorage 備份
+        writeLocalBackup();
         reportFirestoreWrite(userDocRef('settings').set({
             openRouterApiKey: openRouterApiKeyCache,
             emailJsConfig,
@@ -3156,9 +3151,6 @@
         return '年配';
     }
 
-    // 真實歷史配息資料庫（拒絕盲目預估）：不使用任何「查無資料就套用固定殖利率%」的猜測邏輯，
-    // 改用實際查證過的歷年官方已發放現金股利（元/股），計算方式固定是「股數 × 歷史實際配息
-    // 金額」。查證時間 2026-08-11。清單以外的代號一律誠實顯示「尚無歷史配息紀錄」。
     const HISTORICAL_DIVIDEND_DB = {
         '0050': [{ year: 2025, perShare: 3.06 }, { year: 2024, perShare: 4.00 }, { year: 2023, perShare: 4.50 }],
         '2449': [{ year: 2025, perShare: 4.0 }, { year: 2024, perShare: 3.2 }, { year: 2023, perShare: 3.5 }],
@@ -3204,11 +3196,6 @@
         return null;
     }
 
-    // 三大法人買賣超日報（T86）：迴圈往回找最近一個有資料的交易日（處理假日／盤中還沒收盤的情況），
-    // 一次抓回全市場所有股票當天的外資／投信／自營商買賣超股數。除了原本就有的 foreignNet（外資）、
-    // instNet（三大法人合計）之外，這裡額外解析出 trustNet（投信）與 dealerNet（自營商，自行＋避險
-    // 合計），供「籌碼結構 // 法人持股比例」圓餅圖使用。欄位名稱用 fields.findIndex 動態比對而非寫死
-    // 欄位順序，避免 TWSE 未來調整欄位順序時整段解析失效。
     async function loadT86Recent() {
         for (let i = 0; i < 8; i++) {
             const { west } = rocDateToday(i);
@@ -3218,7 +3205,7 @@
                 const idxCode = fields.indexOf('證券代號');
                 let idxForeign = fields.findIndex(f => f.includes('外陸資買賣超股數(不含外資自營商)'));
                 if (idxForeign === -1) idxForeign = fields.findIndex(f => f.includes('外陸資買賣超股數'));
-                let idxTotal = fields.length - 1; // 三大法人買賣超股數通常為最後一欄
+                let idxTotal = fields.length - 1;
                 let idxTrust = fields.findIndex(f => f.indexOf('投信') !== -1 && f.indexOf('買賣超') !== -1);
                 let idxDealerTotal = fields.findIndex(f => f === '自營商買賣超股數' || (f.indexOf('自營商') !== -1 && f.indexOf('買賣超') !== -1 && f.indexOf('自行') === -1 && f.indexOf('避險') === -1));
                 let idxDealerSelf = fields.findIndex(f => f.indexOf('自營商') !== -1 && f.indexOf('自行') !== -1 && f.indexOf('買賣超') !== -1);
@@ -3244,8 +3231,6 @@
                 t86Map = map;
                 if (currentSymbol) {
                     renderDayInfo(currentSymbol);
-                    // T86 資料通常是在使用者已經選好股票、診斷面板已經畫好之後才非同步抓完，
-                    // 這裡順便重新畫一次診斷面板，讓籌碼結構圓餅圖不用等使用者手動切換股票才出現
                     renderDiagnosticPanel(currentSymbol);
                 }
                 return;
@@ -6887,6 +6872,11 @@
         return isNaN(n) ? null : n;
     }
 
+    // 注意：只有在「這次真的成功從公開資訊觀測站抓到資料」時，才會寫入 monthlyRevenueMap／
+    // localStorage 快取；fetchJSONSafe 逾時或網路失敗回傳 null 時，一律維持 null、不快取空物件。
+    // 這點很重要——如果失敗也快取一個空的 {}，之後同一個 session 內的自動重試（見
+    // renderFinancialModule 的同步重試機制）會因為「monthlyRevenueMap 已經是 truthy」而
+    // 直接把空快取當成功回傳，永遠不會真的再打一次 API，財務診斷面板就會卡在假的失敗狀態。
     async function loadMonthlyRevenueMap() {
         if (monthlyRevenueMap) return monthlyRevenueMap;
         const cacheRaw = localStorage.getItem('tw_monthly_revenue_cache');
@@ -6897,13 +6887,12 @@
             } catch (e) {}
         }
         const data = await fetchJSONSafe(`${TWSE_OPEN}/opendata/t187ap05_L`, 25000);
+        if (!Array.isArray(data)) return null; // 這次抓取失敗，不快取、讓下次呼叫（含自動重試）能真正重新嘗試
         const map = {};
-        if (Array.isArray(data)) {
-            data.forEach(row => {
-                const code = row['公司代號'];
-                if (code) map[code] = row;
-            });
-        }
+        data.forEach(row => {
+            const code = row['公司代號'];
+            if (code) map[code] = row;
+        });
         monthlyRevenueMap = map;
         localStorage.setItem('tw_monthly_revenue_cache', JSON.stringify({ ts: Date.now(), data: map }));
         return map;
@@ -6919,13 +6908,12 @@
             } catch (e) {}
         }
         const data = await fetchJSONSafe(`${TWSE_OPEN}/opendata/t187ap06_L_ci`, 25000);
+        if (!Array.isArray(data)) return null;
         const map = {};
-        if (Array.isArray(data)) {
-            data.forEach(row => {
-                const code = row['公司代號'];
-                if (code) map[code] = row;
-            });
-        }
+        data.forEach(row => {
+            const code = row['公司代號'];
+            if (code) map[code] = row;
+        });
         quarterlyIncomeMap = map;
         localStorage.setItem('tw_quarterly_income_cache', JSON.stringify({ ts: Date.now(), data: map }));
         return map;
@@ -6941,13 +6929,12 @@
             } catch (e) {}
         }
         const data = await fetchJSONSafe(`${TWSE_OPEN}/opendata/t187ap07_L_ci`, 25000);
+        if (!Array.isArray(data)) return null;
         const map = {};
-        if (Array.isArray(data)) {
-            data.forEach(row => {
-                const code = row['公司代號'];
-                if (code) map[code] = row;
-            });
-        }
+        data.forEach(row => {
+            const code = row['公司代號'];
+            if (code) map[code] = row;
+        });
         balanceSheetMap = map;
         localStorage.setItem('tw_balance_sheet_cache', JSON.stringify({ ts: Date.now(), data: map }));
         return map;
@@ -7058,20 +7045,28 @@
         const incRevenue = pickNumber(incomeRow, ['營業收入']);
         const grossProfit = pickNumber(incomeRow, ['營業毛利（毛損）', '營業毛利(毛損)']);
         const operatingIncome = pickNumber(incomeRow, ['營業利益（損失）', '營業利益(損失)']);
+        // 稅後淨利（本期淨利）：綜合損益表的「本期淨利（淨損）」欄位，跟 EPS 一起呈現「稅後淨利與 EPS」
+        const netIncome = pickNumber(incomeRow, ['本期淨利（淨損）', '本期淨利(淨損)', '淨利（淨損）', '淨利(淨損)']);
         const eps = pickNumber(incomeRow, ['基本每股盈餘（元）', '基本每股盈餘(元)']);
 
         const totalAssets = pickNumber(balanceRow, ['資產總額', '資產總計']);
         const totalLiabilities = pickNumber(balanceRow, ['負債總額', '負債總計']);
+        // 流動資產／流動負債：資產負債表原始欄位，用來算「流動比率」（衡量短期償債能力）
+        const currentAssets = pickNumber(balanceRow, ['流動資產', '流動資產合計']);
+        const currentLiabilities = pickNumber(balanceRow, ['流動負債', '流動負債合計']);
 
         const grossMarginPct = (incRevenue && grossProfit !== null) ? (grossProfit / incRevenue) * 100 : null;
         const operatingMarginPct = (incRevenue && operatingIncome !== null) ? (operatingIncome / incRevenue) * 100 : null;
         const debtRatioPct = (totalAssets && totalLiabilities !== null) ? (totalLiabilities / totalAssets) * 100 : null;
+        const currentRatioPct = (currentLiabilities && currentAssets !== null) ? (currentAssets / currentLiabilities) * 100 : null;
 
         return {
             available: true,
             revenueMonth,
             curRevenue, lastMonthRevenue, lastYearRevenue, yoyPct,
-            eps, grossMarginPct, operatingMarginPct, debtRatioPct
+            curQuarterRevenue: incRevenue, // 單季營收：來自綜合損益表本身，跟月營收是不同週期的官方數字
+            grossProfit, operatingIncome, netIncome, eps,
+            grossMarginPct, operatingMarginPct, debtRatioPct, currentRatioPct
         };
     }
 
@@ -7103,11 +7098,17 @@
 
         const tech = computeTechnicalSnapshot(priceRows, stock.price);
         const todayVolume = getLatestVolumeFromRows(priceRows);
+        // revMap/incMap/balMap 三個資料源全部都是 null，代表這次三個 API 全部抓取失敗
+        // （網路問題、逾時等）；只要有任何一個成功回來，就不算「抓取失敗」，只是這個代號剛好
+        // 不在該資料集裡（例如金融保險業使用特殊財報格式，本來就不會出現在一般業資料集）。
+        // 這兩種情況要分開處理：前者可以自動重試，後者重試也不會有結果，直接誠實說明原因。
+        const financialFetchFailed = !etf && revMap === null && incMap === null && balMap === null;
         const fin = etf ? { available: false, isEtf: true } : buildFinancialSnapshot(
             revMap ? revMap[symbol] : null,
             incMap ? incMap[symbol] : null,
             balMap ? balMap[symbol] : null
         );
+        if (fin && !etf) fin.fetchFailed = financialFetchFailed;
 
         mounts.forEach((el, idx) => paintDiagnosticPanel(el, `diag${idx}`, stock, etf, tech, fin, todayVolume));
     }
@@ -7136,7 +7137,7 @@
                     </div>
                     <p class="text-[11px] text-gray-400">財務數據來源：公開資訊觀測站最新一期公告；技術指標依近期日收盤價自行計算，僅供參考，不是投資建議。</p>
                 </div>
-                ${renderFinancialModule(uid, fin, etf, tech)}
+                ${renderFinancialModule(uid, fin, etf, tech, stock.symbol)}
                 ${renderInstitutionalModule(uid, stock.symbol, todayVolume)}
                 ${renderTechnicalModule(uid, tech)}
                 ${renderConclusionModule(stock, tech, fin, etf)}
@@ -7161,31 +7162,28 @@
         </div>`;
     }
 
-    // 台股整體概略的財務比率參考區間（非個股逐筆真實數字）：純粹用來在「這檔股票本身的財報資料
-    // 暫時抓不到」時，讓財務診斷看板還能顯示一些內容，而不是一片空白的失敗訊息。數字是市場常見的
-    // 概略區間，UI 上一律清楚標註「非本檔真實數字」，避免使用者誤以為是這家公司自己的財報數字。
-    const INDUSTRY_AVG_REFERENCE = { grossMarginPct: 20, operatingMarginPct: 8, debtRatioPct: 45 };
-
-    // ETF 沒有「營收」「毛利率」這類財報指標可看，改用它自己近期的市價漲跌幅呈現表現。這裡直接
-    // 重複使用 renderDiagnosticPanel 裡已經抓過的近期收盤價（tech.closes，跟技術面模組共用同一份
-    // 資料），不需要再額外發一次 API 請求；用市價漲跌幅取代「淨值或追蹤指數表現」，是因為公開的
-    // 免費資料來源沒有即時 ETF 淨值或追蹤指數比較的可靠管道，市價本身已經是最接近、也最容易取得
-    // 的代理指標。
-    function computeEtfPricePerformance(tech) {
-        if (!tech || !Array.isArray(tech.closes) || tech.closes.length < 21) return null;
-        const closes = tech.closes;
-        const latest = closes[closes.length - 1];
-        const pctAgo = (daysAgo) => {
-            const idx = closes.length - 1 - daysAgo;
-            if (idx < 0 || !closes[idx]) return null;
-            return ((latest - closes[idx]) / closes[idx]) * 100;
-        };
-        const d20 = pctAgo(20);
-        if (d20 === null) return null;
-        return { d20, d60: closes.length > 60 ? pctAgo(60) : null, d120: closes.length > 120 ? pctAgo(120) : null };
+    // 沒有數字時用來顯示金額類欄位（稅後淨利／營業毛利等）的卡片，不套用健康/普通/偏低評語，
+    // 只單純呈現公開資訊觀測站原始公告的實際數字（單位：千元，跟原始資料集一致）
+    function diagMoneyStatCard(label, value) {
+        if (value === null || value === undefined || isNaN(value)) {
+            return `<div class="diag-stat-card">
+                <p class="diag-stat-label">${label}</p>
+                <p class="diag-stat-value">-</p>
+                <p class="diag-stat-verdict">目前查不到這項資料。</p>
+            </div>`;
+        }
+        return `<div class="diag-stat-card">
+            <p class="diag-stat-label">${label}</p>
+            <p class="diag-stat-value">NT$ ${fmtNum(value)} 千元</p>
+            <p class="diag-stat-verdict">依公開資訊觀測站最新一期公告的實際數字。</p>
+        </div>`;
     }
 
-    function renderFinancialModule(uid, fin, etf, tech) {
+    // 財報同步失敗時的自動重試計數器：symbol -> 已重試次數，避免同一檔股票在畫面上無限迴圈重試
+    const financialDiagnosticRetryCount = {};
+    const FINANCIAL_DIAGNOSTIC_MAX_RETRY = 2;
+
+    function renderFinancialModule(uid, fin, etf, tech, symbol) {
         if (etf) {
             const perf = computeEtfPricePerformance(tech);
             if (!perf) {
@@ -7204,21 +7202,38 @@
                 </div>
             </div>`;
         }
+
         if (!fin || !fin.available) {
-            // 財報資料來源暫時讀取不到：不要只顯示一句「抓不到資料」就結束，改用台股市場概略的
-            // 歷史平均區間頂著，讓看板還能穩定顯示內容；明確標註這不是這家公司本身的真實數字，
-            // 等資料來源恢復後，下次重新整理會自動換回這檔股票自己的真實財報。
-            return `<div class="card-white p-8 rounded-3xl space-y-3">
-                <p class="diag-module-title">FINANCIALS // 財務診斷（暫用歷史平均參考）</p>
-                <div class="diag-etf-banner">目前抓不到這檔股票本身的財報資料（可能是公開資訊觀測站暫時無回應，或這是金融、保險等使用特殊財報格式的產業，本功能主要支援一般產業個股）。下方暫時改用台股市場常見的概略區間供參考——<strong>不是這家公司本身的真實數字</strong>，資料來源恢復後會自動換回真實財報。</div>
-                <div class="diag-stat-grid">
-                    ${diagStatCard('毛利率 GROSS MARGIN（市場概略均值）', INDUSTRY_AVG_REFERENCE.grossMarginPct, '%', () => '僅為台股整體概略參考區間，非本檔真實數字')}
-                    ${diagStatCard('營業利益率 OPERATING MARGIN（市場概略均值）', INDUSTRY_AVG_REFERENCE.operatingMarginPct, '%', () => '僅為台股整體概略參考區間，非本檔真實數字')}
-                    ${diagStatCard('負債比率 DEBT RATIO（市場概略均值）', INDUSTRY_AVG_REFERENCE.debtRatioPct, '%', () => '僅為台股整體概略參考區間，非本檔真實數字')}
-                </div>
-                <p class="text-[11px] text-gray-400">參考來源：台灣證券交易所公開資訊觀測站歷年上市公司財務比率概況（市場概略區間，非個股逐筆數字）。</p>
+            // 拒絕虛構與籠統估算：這裡絕對不會用「台股市場概略區間」之類的假資料頂替。
+            // 只分兩種誠實情況：(1) 這次真的是網路/API 暫時抓不到 → 顯示同步中並自動重試幾次；
+            // (2) 資料集本身有回來、但這個代號本來就不在「一般業」財報格式的資料集裡（常見於金融、
+            //     保險、證券等特殊財報格式產業）→ 誠實說明原因，不重試（重試也不會有結果）。
+            if (fin && fin.fetchFailed) {
+                const retried = financialDiagnosticRetryCount[symbol] || 0;
+                if (retried < FINANCIAL_DIAGNOSTIC_MAX_RETRY) {
+                    financialDiagnosticRetryCount[symbol] = retried + 1;
+                    setTimeout(() => {
+                        // 使用者可能在等待期間切換到別的股票，這裡要確認目前選取的還是同一檔才重畫
+                        if (currentSymbol === symbol) renderDiagnosticPanel(symbol);
+                    }, 4000);
+                    return `<div class="card-white p-8 rounded-3xl">
+                        <p class="diag-module-title">FINANCIALS // 財務診斷</p>
+                        <div class="diag-etf-banner">正在從公開資訊觀測站同步真實財報...（第 ${retried + 1} 次重試，請稍候）</div>
+                    </div>`;
+                }
+                return `<div class="card-white p-8 rounded-3xl">
+                    <p class="diag-module-title">FINANCIALS // 財務診斷</p>
+                    <div class="diag-etf-banner">已嘗試多次仍無法連上公開資訊觀測站，可能是暫時性的網路問題。請稍後手動重新整理頁面再試一次；本面板絕不會用板塊平均或任何估算值頂替真實財報，寧可顯示空白也要確保數字精準。</div>
+                </div>`;
+            }
+            return `<div class="card-white p-8 rounded-3xl">
+                <p class="diag-module-title">FINANCIALS // 財務診斷</p>
+                <div class="diag-etf-banner">公開資訊觀測站的一般產業財報資料集裡查不到這檔股票（${symbol}）本身的資料，通常是因為這是金融、保險、證券等使用特殊財報格式的產業（不適用一般業財報格式，本功能目前只涵蓋一般產業個股）。想查這類產業的財報，建議直接到公開資訊觀測站官網搜尋這個代號。</div>
             </div>`;
         }
+
+        // 重新讀到真實資料了，把這檔股票的重試計數歸零，下次萬一又失敗才能重新從頭數
+        financialDiagnosticRetryCount[symbol] = 0;
 
         let revenueNote = '目前抓不到這檔股票的月營收資料。';
         if (fin.yoyPct !== null) {
@@ -7232,7 +7247,10 @@
                 ${diagStatCard('毛利率 GROSS MARGIN', fin.grossMarginPct, '%', v => v >= 30 ? '健康（產品或服務有一定的訂價能力）' : v >= 15 ? '普通（同業競爭可能比較激烈）' : '偏低（留意毛利被壓縮的原因）')}
                 ${diagStatCard('營業利益率 OPERATING MARGIN', fin.operatingMarginPct, '%', v => v >= 15 ? '健康（本業經營效率不錯）' : v >= 5 ? '普通（本業獲利空間有限）' : '偏低（本業賺錢能力較弱）')}
                 ${diagStatCard('負債比率 DEBT RATIO', fin.debtRatioPct, '%', v => v <= 50 ? '健康（借的錢在安全範圍內）' : v <= 70 ? '普通（負債偏高，留意還款壓力）' : '偏高（財務槓桿較重，波動風險較大）')}
+                ${diagStatCard('流動比率 CURRENT RATIO', fin.currentRatioPct, '%', v => v >= 150 ? '健康（短期償債能力充足）' : v >= 100 ? '普通（短期償債能力尚可）' : '偏低（短期償債壓力較大，需留意流動性）')}
                 ${diagStatCard('EPS 每股盈餘', fin.eps, ' 元', v => v >= 1 ? '公司目前是賺錢的，數字越大代表每股賺越多' : v >= 0 ? '公司微幅獲利' : '公司目前是虧損狀態')}
+                ${diagMoneyStatCard('稅後淨利 NET INCOME', fin.netIncome)}
+                ${diagMoneyStatCard('營業毛利 GROSS PROFIT', fin.grossProfit)}
             </div>
             <div class="diag-stat-card mt-3">
                 <p class="diag-stat-label">自由現金流 FREE CASH FLOW [公司賺到的錢扣掉維持營運要花的錢，剩下能自由運用的現金]</p>
@@ -7242,7 +7260,11 @@
         return `<div class="card-white p-8 rounded-3xl space-y-4">
             <p class="diag-module-title">FINANCIALS // 近期財務動能與體質評估</p>
             <div>
-                <p class="text-xs text-gray-500 mb-2">近期營收比較：代表這家公司最近賺錢的能力是越來越好還是衰退。${fin.revenueMonth ? `（資料年月：${fin.revenueMonth}）` : ''}</p>
+                <p class="text-xs text-gray-500 mb-2">單季營收 QUARTERLY REVENUE（依最新一期綜合損益表公告）</p>
+                ${diagMoneyStatCard('本季營業收入', fin.curQuarterRevenue)}
+            </div>
+            <div>
+                <p class="text-xs text-gray-500 mb-2">月營收年增率 YoY（依最新月營收公告，跟上面的單季營收是不同週期的官方資料）：代表這家公司最近賺錢的能力是越來越好還是衰退。${fin.revenueMonth ? `（資料年月：${fin.revenueMonth}）` : ''}</p>
                 <div class="w-full h-48"><canvas id="chart-fin-${uid}"></canvas></div>
                 <p class="diag-note">${revenueNote}</p>
             </div>
@@ -7285,16 +7307,32 @@
         });
     }
 
+    // ETF 沒有「營收」「毛利率」這類財報指標可看，改用它自己近期的市價漲跌幅呈現表現。直接
+    // 重複使用已經抓過的近期收盤價（tech.closes，跟技術面模組共用同一份資料），不需要再額外
+    // 發一次 API 請求。
+    function computeEtfPricePerformance(tech) {
+        if (!tech || !Array.isArray(tech.closes) || tech.closes.length < 21) return null;
+        const closes = tech.closes;
+        const latest = closes[closes.length - 1];
+        const pctAgo = (daysAgo) => {
+            const idx = closes.length - 1 - daysAgo;
+            if (idx < 0 || !closes[idx]) return null;
+            return ((latest - closes[idx]) / closes[idx]) * 100;
+        };
+        const d20 = pctAgo(20);
+        if (d20 === null) return null;
+        return { d20, d60: closes.length > 60 ? pctAgo(60) : null, d120: closes.length > 120 ? pctAgo(120) : null };
+    }
+
     /* ========================================================================
        籌碼結構 // 法人持股比例圓餅圖
        ----------------------------------------------------------------------
-       重要說明：TWSE 公開、免費、即時可查的資料裡，三大法人（T86）給的是「當天買賣超
-       股數」（今天淨買進或淨賣出多少張），並不是「累積持股占總股本的百分比」——真正的
-       累積持股比例需要集保結算所的股權分散表，屬於週更新、非即時的資料，且免費 API
-       未涵蓋。因此這裡如實呈現成「當日籌碼結構比重」：把外資／投信／自營商三大法人
-       當天買賣超股數的絕對量體，加上用當天總成交量概略推算出的「散戶及其他」量體，
-       畫成一個圓餅圖，呈現的是當天資金流向的相對比重，不是長期持股占比，UI 文案上
-       會明確標註這一點，避免使用者誤解成真正的股權結構。
+       重要說明：TWSE 公開、免費、即時可查的資料裡，三大法人（T86）給的是「當天買賣超股數」
+       （今天淨買進或淨賣出多少張），並不是「累積持股占總股本的百分比」——真正的累積持股比例
+       需要集保結算所的股權分散表，屬於週更新、非即時的資料，免費 API 未涵蓋。因此這裡如實
+       呈現成「當日籌碼結構比重」：把外資／投信／自營商三大法人當天買賣超股數的絕對量體，加上
+       用當天總成交量概略推算出的「散戶及其他」量體，畫成一個圓餅圖，呈現的是當天資金流向的
+       相對比重，不是長期持股占比，UI 文案上會明確標註這一點。
     ======================================================================== */
     function computeInstitutionalStructure(symbol, todayVolume) {
         const t86 = t86Map[symbol];
@@ -7303,9 +7341,7 @@
         const trust = (typeof t86.trustNet === 'number' && !isNaN(t86.trustNet)) ? Math.abs(t86.trustNet) : 0;
         const dealer = (typeof t86.dealerNet === 'number' && !isNaN(t86.dealerNet)) ? Math.abs(t86.dealerNet) : 0;
         const instAbsTotal = foreign + trust + dealer;
-        if (instAbsTotal <= 0) return null; // 三大法人買賣超數字完全抓不到，視為無可用籌碼資料
-        // 只有在「當天總成交量」也抓得到、而且大於三大法人量體總和時，才能合理推算散戶及其他部位；
-        // 否則寧可只顯示三大法人的比重，也不要硬湊一個可能是負數或不合理的散戶數字
+        if (instAbsTotal <= 0) return null;
         const retail = (typeof todayVolume === 'number' && todayVolume > 0 && todayVolume >= instAbsTotal)
             ? (todayVolume - instAbsTotal) : null;
         return { foreign, trust, dealer, retail, date: t86.date };
@@ -7333,7 +7369,7 @@
         const chartKey = `chart-inst-${uid}`;
         if (diagnosticCharts[chartKey]) { diagnosticCharts[chartKey].destroy(); delete diagnosticCharts[chartKey]; }
         const canvas = document.getElementById(`instHolderPieChart-${uid}`);
-        if (!canvas) return; // 沒有畫布代表上面的 renderInstitutionalModule 已經走了「無資料」分支
+        if (!canvas) return;
         const structure = computeInstitutionalStructure(symbol, todayVolume);
         if (!structure) return;
         const labels = ['外資', '投信', '自營商'];
