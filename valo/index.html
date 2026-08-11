@@ -104,6 +104,56 @@
         }
         #cloud-sync-banner-close:hover { color: #fff; }
 
+        /* ---- 雲端同步狀態橫幅：Firestore 讀取／寫入失敗時的顯眼提示，固定在畫面最上層 ---- */
+        #cloud-sync-banner {
+            position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
+            display: flex; justify-content: center;
+            padding: 10px 12px 0;
+            pointer-events: none;
+        }
+        #cloud-sync-banner.hidden { display: none; }
+        #cloud-sync-banner-inner {
+            pointer-events: auto;
+            display: flex; align-items: flex-start; gap: 10px;
+            max-width: 640px; width: 100%;
+            background: var(--c-dark);
+            color: #fff;
+            border-radius: 14px;
+            padding: 12px 14px;
+            box-shadow: 0 10px 30px rgba(53, 30, 28, 0.35);
+            animation: cloudSyncBannerIn .25s cubic-bezier(.4,0,.2,1);
+        }
+        @keyframes cloudSyncBannerIn {
+            from { opacity: 0; transform: translateY(-8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        #cloud-sync-banner-icon {
+            flex-shrink: 0;
+            width: 20px; height: 20px;
+            border-radius: 999px;
+            background: var(--c-accent);
+            color: #fff;
+            font-weight: 900;
+            font-size: 12px;
+            display: flex; align-items: center; justify-content: center;
+            margin-top: 1px;
+        }
+        #cloud-sync-banner-text {
+            flex: 1;
+            font-size: 12.5px;
+            line-height: 1.6;
+            white-space: pre-line;
+        }
+        #cloud-sync-banner-close {
+            flex-shrink: 0;
+            color: rgba(255,255,255,0.6);
+            font-weight: 900;
+            font-size: 16px;
+            line-height: 1;
+            padding: 2px 4px;
+        }
+        #cloud-sync-banner-close:hover { color: #fff; }
+
         /* ---- 現代高端字體排版 (Apple / Stripe 質感)：Inter 為主體，中文回退到 Noto Sans TC，
            全站統一開啟抗鋸齒與幾何精確渲染，取代原本偏老舊粗糙的系統預設字體觀感 ---- */
         html, body {
@@ -910,6 +960,17 @@
             <p id="firebase-setup-note" class="login-setup-note hidden"></p>
 
             <button type="button" onclick="openDisclaimerModal('review')" class="login-disclaimer-link">[ 隱私聲明與法律免責條款 ]</button>
+        </div>
+    </div>
+
+    <!-- ============ 雲端同步狀態橫幅：Firestore 讀取／寫入失敗時在這裡顯眼提示，不再只是
+         悄悄印在瀏覽器 console 裡讓使用者完全看不到。固定在畫面最上層，登入前後都看得到，
+         可以手動關閉，同一則訊息不會因為畫面重繪就消失。 ============ -->
+    <div id="cloud-sync-banner" class="hidden" role="alert">
+        <div id="cloud-sync-banner-inner">
+            <span id="cloud-sync-banner-icon">!</span>
+            <p id="cloud-sync-banner-text"></p>
+            <button type="button" onclick="hideCloudSyncBanner()" id="cloud-sync-banner-close" aria-label="關閉提示">×</button>
         </div>
     </div>
 
@@ -1799,6 +1860,28 @@
             fbAuth = firebase.auth();
             fbDb = firebase.firestore();
 
+            // 修復「Failed to get document because the client is offline.」硬性失敗：
+            // Firestore 預設的 WebChannel 串流連線在某些網路環境（公司/校園防火牆、部分廣告攔截
+            // 外掛、不穩定的行動網路）會被擋下或誤判成離線，即使裝置實際上有網路，.get() 也會
+            // 立刻丟出「client is offline」而不是重試。這裡做兩件事降低這個情況發生的機率：
+            // 1. experimentalAutoDetectLongPolling：自動偵測是否需要改用長輪詢 (long polling)
+            //    取代 WebChannel streaming，繞開會攔截串流連線的網路環境。
+            // 2. enablePersistence：開啟瀏覽器本機 IndexedDB 離線快取，讓 Firestore 在真的偵測到
+            //    離線時，能自動改用「上一次成功讀到的雲端資料快取」回應，而不是直接對 .get() 拋出
+            //    例外——這樣即使暫時離線，畫面上也不會突然被清空，而是繼續顯示最後一次同步成功的
+            //    持股與現金（等網路恢復，下一次讀取會自動換上真正最新的雲端資料）。
+            try {
+                fbDb.settings({ experimentalAutoDetectLongPolling: true, merge: true });
+            } catch (e) {
+                console.warn('Firestore settings（長輪詢自動偵測）套用失敗，不影響基本功能', e);
+            }
+            fbDb.enablePersistence({ synchronizeTabs: true }).catch(e => {
+                // failed-precondition：同時開了多個分頁且不支援多分頁同步時常見；unimplemented：
+                // 瀏覽器不支援 IndexedDB（例如某些隱私瀏覽模式）。兩種情況都只是離線快取用不了，
+                // 不影響正常有網路時的讀寫功能，這裡單純記錄一下，不用打斷使用者。
+                console.warn('Firestore 離線快取（enablePersistence）啟用失敗，離線時可能無法顯示快取資料，但正常連線時完全不受影響', e && e.code ? e.code : e);
+            });
+
             // 用「直接雙擊開檔案」（網址列會是 file://...）打開時，瀏覽器通常不允許網頁使用
             // indexedDB / localStorage 來源隔離儲存，Firebase Auth 預設的持久化機制會直接噴錯，
             // 連 Email/密碼登入都會壞掉。這裡改成不持久化登入狀態（每次重新整理都要重新登入），
@@ -1867,6 +1950,29 @@
     // 直接在 login-screen／app-shell 之間切換就好，不用讓遮罩再跳出來一次
     let authResolvedOnce = false;
 
+    /* ------------------------------------------------------------------------
+       免責聲明同意狀態：本地快取（依帳號 UID 區分）
+       ------------------------------------------------------------------------
+       雲端 Firestore 的 settings 文件（disclaimerAgreed 欄位）本來就是「這個帳號是否已同意」
+       的權威資料，但如果剛好遇到雲端讀取失敗（離線、Firestore 規則問題、網路不穩），單靠雲端
+       判斷就會誤把「已經同意過的老帳號」當成新帳號，逼使用者重新看一次免責聲明、重新勾選——
+       這裡額外用 localStorage 存一份「這個 UID 是否同意過」的本地快取當第二道保險：
+       - key 用 'valo_disclaimer_agreed_' + uid，天生就是「帳號綁定」，換一個 Google 帳號登入、
+         或全新註冊的帳號，因為 uid 不同、localStorage 裡完全沒有對應的 key，一樣會正常觸發
+         強制閘門，不會有「別人同意過我就自動跳過」的外洩風險。
+       - 只要雲端確認同意、或本地快取顯示同意過，兩者任一為真就跳過強制閘門，讓同一個帳號
+         之後不管是重新整理、重新登入、或剛好那次雲端連線不穩，都不會被迫重複勾選。
+    ------------------------------------------------------------------------ */
+    function disclaimerLocalKey(uid) {
+        return 'valo_disclaimer_agreed_' + uid;
+    }
+    function readDisclaimerLocalFlag(uid) {
+        try { return localStorage.getItem(disclaimerLocalKey(uid)) === 'true'; } catch (e) { return false; }
+    }
+    function writeDisclaimerLocalFlag(uid) {
+        try { localStorage.setItem(disclaimerLocalKey(uid), 'true'); } catch (e) { /* 部分隱私瀏覽模式可能會擋，忽略即可 */ }
+    }
+
     async function handleAuthStateChanged(user) {
         currentUser = user;
         const overlay = document.getElementById('loading-overlay');
@@ -1886,8 +1992,14 @@
 
             // 嚴謹二分法：讀完雲端資料、確認 disclaimerAgreed 狀態後，才決定要不要收起遮罩、
             // 要不要打開 app-shell——這兩件事绝對不會在確認同意狀態之前發生。
-            const hasAgreed = disclaimerAgreed === true;
+            // hasAgreed 同時看雲端資料（disclaimerAgreed）與本地快取（readDisclaimerLocalFlag），
+            // 任一個為真就視為已同意，兩者互為備援：雲端是長期權威來源，本地快取則確保網路
+            // 不穩、Firestore 暫時讀取失敗時，同一個帳號也不會被迫重新看一次免責聲明。
+            const hasAgreed = disclaimerAgreed === true || readDisclaimerLocalFlag(user.uid);
             if (hasAgreed) {
+                // 兩邊只要有一邊確認同意過，就順便把本地快取補齊／刷新一次時效，讓下次即使
+                // 雲端剛好讀取失敗，也還是能靠這份本地紀錄跳過強制閘門
+                writeDisclaimerLocalFlag(user.uid);
                 // 情境 A：這個帳號已經同意過——收起遮罩、正式顯示主儀表板，才開始渲染看板／讀股價
                 if (overlay) overlay.classList.add('hidden');
                 document.getElementById('app-shell').classList.remove('hidden');
@@ -1933,7 +2045,24 @@
         cashAlertThreshold = 0;
         const keyInput = document.getElementById('openrouter-api-key');
         if (keyInput) keyInput.value = '';
-        try { localStorage.clear(); } catch (e) { /* 部分瀏覽器隱私模式可能會擋，忽略即可 */ }
+        // 登出時清空 localStorage：公開市場資料快取（公司名冊等）、上一位使用者可能殘留的任何
+        // 暫存痕跡都要清乾淨，確保共用裝置換帳號登入不會外洩上一位使用者的資料。
+        // 但「valo_disclaimer_agreed_<uid>」這組帳號綁定的免責聲明同意紀錄要刻意保留下來——
+        // 這是本地端的第二道保險（見 handleAuthStateChanged 裡的 hasAgreed 判斷），如果每次
+        // 登出都整批清掉，會直接讓「同一個帳號不用每次都重新勾選」這件事失效，下次同一個帳號
+        // 重新登入、剛好雲端讀取又不順的話，一樣會被迫重新看一次免責聲明。因為這組 key 本身
+        // 是用 uid 當後綴、天生帳號綁定，換成別的 Google 帳號登入時 key 對不上，還是會正常
+        // 重新觸發強制閘門，不會有資料外洩或跳過別人同意紀錄的風險。
+        try {
+            const disclaimerPrefix = 'valo_disclaimer_agreed_';
+            const preserved = {};
+            for (let i = 0; i < localStorage.length; i++) {
+                const k = localStorage.key(i);
+                if (k && k.indexOf(disclaimerPrefix) === 0) preserved[k] = localStorage.getItem(k);
+            }
+            localStorage.clear();
+            Object.keys(preserved).forEach(k => localStorage.setItem(k, preserved[k]));
+        } catch (e) { /* 部分瀏覽器隱私模式可能會擋，忽略即可 */ }
     }
 
     /* ------------------------------------------------------------------------
@@ -2040,6 +2169,11 @@
 
         disclaimerAgreed = true;
         closeDisclaimerModal();
+        if (currentUser) {
+            // 本地快取（依 UID）先寫，就算接下來的雲端寫入剛好遇到離線／規則問題，這個帳號
+            // 之後重新整理或重新登入，也還是能靠這份本地紀錄跳過強制閘門，不用重新勾選一次
+            writeDisclaimerLocalFlag(currentUser.uid);
+        }
         if (currentUser && fbDb) {
             reportFirestoreWrite(userDocRef('settings').set({
                 disclaimerAgreed: true,
@@ -2184,13 +2318,13 @@
         const code = (e && e.code) || '';
         const msg = (e && e.message) || String(e || '未知錯誤');
         const isPermission = code === 'permission-denied' || /permission/i.test(msg);
-        const isNetwork = code === 'unavailable' || /network|offline/i.test(msg);
+        const isOffline = code === 'unavailable' || /offline|network/i.test(msg);
         const action = kind === 'write' ? '寫入' : '讀取';
         let hint;
         if (isPermission) {
             hint = '最可能的原因：Firebase Console 的 Firestore「安全規則」尚未正確設定（或還停在測試模式、已經到期），導致已登入的帳號也被拒絕讀寫自己的資料。請到 Firebase Console →「Firestore Database」→「規則」，貼上 index.html 開頭 Firebase 區塊註解裡的規則後按「發布」。';
-        } else if (isNetwork) {
-            hint = '最可能的原因：目前裝置沒有網路連線或連線不穩定，請確認網路狀態後重試一次。';
+        } else if (isOffline) {
+            hint = '最可能的原因：裝置目前沒有網路連線、或連線被中斷（部分公司／校園網路、廣告攔截外掛也可能誤擋 Firestore 的連線）。這個網頁已經開啟本機離線快取，若之前成功同步過，畫面會先顯示上次快取的資料；請確認網路狀態後重新整理頁面，讓系統重新抓取最新雲端資料。';
         } else {
             hint = '請重新整理頁面再試一次；如果持續發生，請檢查 Firebase 專案設定（firebaseConfig）與 Firestore 安全規則是否正確。';
         }
@@ -2206,6 +2340,22 @@
             console.warn(`雲端儲存失敗（${contextLabel}）`, e);
             showCloudSyncBanner(buildCloudSyncErrorMessage(contextLabel, e, 'write'));
         });
+    }
+
+    // 讀取 Firestore 文件時的離線保險機制：先照預設方式讀（有網路就直接讀伺服器最新資料；
+    // 如果 initFirebase() 裡的 enablePersistence 有成功啟用，SDK 在偵測到離線時本來就會
+    // 自動改用本機快取，不太需要走到 catch）。萬一還是被判定成「client is offline」這類
+    // 離線相關錯誤，這裡再明確試一次「只讀本機快取」（{ source: 'cache' }），盡量把上一次
+    // 成功同步過的資料撈回來，而不是讓使用者一時網路不穩就整批被當成「沒有資料」。
+    async function getDocWithOfflineFallback(ref) {
+        try {
+            return await ref.get();
+        } catch (e) {
+            const isOfflineError = (e && e.code === 'unavailable') || /offline/i.test((e && e.message) || '');
+            if (!isOfflineError) throw e;
+            console.warn('Firestore 線上讀取失敗（判定為離線相關錯誤），改嘗試讀取本機快取', e);
+            return await ref.get({ source: 'cache' }); // 本機若也沒有快取，一樣會拋出例外，交給外層 catch 處理
+        }
     }
 
     /* ---- Firestore 讀寫：路徑 users/{uid}/portfolio_data/{holdings|settings|memory}，
@@ -2230,10 +2380,10 @@
         let readFailed = false;
         try {
             const [holdingsSnap, settingsSnap, memorySnap, tradeHistorySnap] = await Promise.all([
-                userDocRef('holdings').get(),
-                userDocRef('settings').get(),
-                userDocRef('memory').get(),
-                userDocRef('trade_history').get()
+                getDocWithOfflineFallback(userDocRef('holdings')),
+                getDocWithOfflineFallback(userDocRef('settings')),
+                getDocWithOfflineFallback(userDocRef('memory')),
+                getDocWithOfflineFallback(userDocRef('trade_history'))
             ]);
             holdingsExists = holdingsSnap.exists;
             if (holdingsSnap.exists) holdingsData = holdingsSnap.data();
@@ -3365,11 +3515,8 @@
     // 畫面連動防呆：這個函式是全站「資料一變動就要重繪」的單一入口（總覽卡片／圓餅圖／持股
     // 清單／再平衡偏移徽章都在這裡串接），任何一個環節都直接讀取 appData.stocks／appData.cash
     // 這個全站唯一的持股與現金來源，絕對不會有第二份「holdings」變數存在。
-    // 為了避免「其中一個子區塊意外拋出例外，導致排在它後面的區塊全部沒機會重繪」這種
-    // 局部渲染失敗的情況（例如某筆持股資料格式異常讓圓餅圖計算出錯，結果連下面的持股清單、
-    // 診斷徽章都被連帶卡住、停留在舊畫面），這裡把每一段渲染都個別包在自己的 try/catch 裡：
-    // 就算某一段真的出錯，也只有那一段會在 console 留下錯誤訊息，其他所有區塊仍然會照常
-    // 用目前最新的 appData 重新繪製，讓畫面呈現的內容跟實際資料保持一致。
+    // 每一段渲染都個別包在自己的 try/catch 裡：就算某一段真的出錯，也只有那一段會在 console
+    // 留下錯誤訊息，其他所有區塊仍然會照常用目前最新的 appData 重新繪製。
     function renderUI() {
         if (!appData) return;
         if (!Array.isArray(appData.stocks)) appData.stocks = []; // appData.stocks 是全站唯一的持股陣列，這裡順手防呆
