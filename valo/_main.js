@@ -1627,41 +1627,61 @@
     /* ========================================================================
        畫面渲染：總覽卡片
     ======================================================================== */
+    // 畫面連動防呆：這個函式是全站「資料一變動就要重繪」的單一入口（總覽卡片／圓餅圖／持股
+    // 清單／再平衡偏移徽章都在這裡串接），任何一個環節都直接讀取 appData.stocks／appData.cash
+    // 這個全站唯一的持股與現金來源，絕對不會有第二份「holdings」變數存在。
+    // 為了避免「其中一個子區塊意外拋出例外，導致排在它後面的區塊全部沒機會重繪」這種
+    // 局部渲染失敗的情況（例如某筆持股資料格式異常讓圓餅圖計算出錯，結果連下面的持股清單、
+    // 診斷徽章都被連帶卡住、停留在舊畫面），這裡把每一段渲染都個別包在自己的 try/catch 裡：
+    // 就算某一段真的出錯，也只有那一段會在 console 留下錯誤訊息，其他所有區塊仍然會照常
+    // 用目前最新的 appData 重新繪製，讓畫面呈現的內容跟實際資料保持一致。
     function renderUI() {
+        if (!appData) return;
+        if (!Array.isArray(appData.stocks)) appData.stocks = []; // appData.stocks 是全站唯一的持股陣列，這裡順手防呆
+
         let totalStockCost = 0;
         let totalStockMarket = 0;
         let totalFeesTaxes = 0;
 
-        appData.stocks.forEach(s => {
-            totalStockCost += s.shares * s.cost;
-            totalStockMarket += s.shares * s.price;
-            s.market_val = s.shares * s.price;
-            totalFeesTaxes += calcCloseCost(s).totalCost;
-        });
+        try {
+            appData.stocks.forEach(s => {
+                totalStockCost += s.shares * s.cost;
+                totalStockMarket += s.shares * s.price;
+                s.market_val = s.shares * s.price;
+                totalFeesTaxes += calcCloseCost(s).totalCost;
+            });
 
-        const totalMarket = appData.cash + totalStockMarket;
-        const totalCost = appData.cash + totalStockCost;
-        // 損益已扣掉「今天全部平倉」估計要付的手續費＋證交稅，更貼近實際能拿回的錢
-        const pnl = (totalMarket - totalCost) - totalFeesTaxes;
-        const pnlRate = totalCost > 0 ? ((pnl / totalCost) * 100).toFixed(1) : 0;
+            const totalMarket = appData.cash + totalStockMarket;
+            const totalCost = appData.cash + totalStockCost;
+            // 損益已扣掉「今天全部平倉」估計要付的手續費＋證交稅，更貼近實際能拿回的錢
+            const pnl = (totalMarket - totalCost) - totalFeesTaxes;
+            const pnlRate = totalCost > 0 ? ((pnl / totalCost) * 100).toFixed(1) : 0;
 
-        document.getElementById('total-market').innerText = fmtNum(totalMarket);
-        document.getElementById('sub-market').innerText = `流動現金 NT$ ${fmtNum(appData.cash)} + 股票現值 NT$ ${fmtNum(totalStockMarket)}`;
+            document.getElementById('total-market').innerText = fmtNum(totalMarket);
+            document.getElementById('sub-market').innerText = `流動現金 NT$ ${fmtNum(appData.cash)} + 股票現值 NT$ ${fmtNum(totalStockMarket)}`;
 
-        document.getElementById('total-cost').innerText = fmtNum(totalCost);
-        document.getElementById('sub-cost').innerText = `流動現金 NT$ ${fmtNum(appData.cash)} + 股票成本 NT$ ${fmtNum(totalStockCost)}`;
+            document.getElementById('total-cost').innerText = fmtNum(totalCost);
+            document.getElementById('sub-cost').innerText = `流動現金 NT$ ${fmtNum(appData.cash)} + 股票成本 NT$ ${fmtNum(totalStockCost)}`;
 
-        document.getElementById('total-pnl').innerText = (pnl >= 0 ? '+' : '') + fmtNum(pnl);
-        document.getElementById('pnl-badge').innerText = (pnl >= 0 ? '+' : '') + pnlRate + '%';
+            document.getElementById('total-pnl').innerText = (pnl >= 0 ? '+' : '') + fmtNum(pnl);
+            document.getElementById('pnl-badge').innerText = (pnl >= 0 ? '+' : '') + pnlRate + '%';
 
-        const cashMgmtEl = document.getElementById('cash-mgmt-current');
-        if (cashMgmtEl) cashMgmtEl.innerText = `NT$ ${fmtNum(appData.cash)}`;
+            const cashMgmtEl = document.getElementById('cash-mgmt-current');
+            if (cashMgmtEl) cashMgmtEl.innerText = `NT$ ${fmtNum(appData.cash)}`;
+        } catch (e) {
+            console.error('renderUI：總覽卡片（總資產／總成本／損益）重繪失敗，其餘區塊仍會照常嘗試重繪', e);
+        }
 
-        renderPie();
-        renderHoldingsManage();
-        updateDeviationBadge();
-        if (!currentSymbol && appData.stocks.length > 0) {
-            selectStock(appData.stocks[0].symbol);
+        try { renderPie(); } catch (e) { console.error('renderUI：資產圓餅圖重繪失敗，其餘區塊仍會照常嘗試重繪', e); }
+        try { renderHoldingsManage(); } catch (e) { console.error('renderUI：持股清單重繪失敗，其餘區塊仍會照常嘗試重繪', e); }
+        try { updateDeviationBadge(); } catch (e) { console.error('renderUI：再平衡偏移徽章重繪失敗', e); }
+
+        try {
+            if (!currentSymbol && appData.stocks.length > 0) {
+                selectStock(appData.stocks[0].symbol);
+            }
+        } catch (e) {
+            console.error('renderUI：自動選取第一檔持股失敗', e);
         }
     }
 
@@ -5408,6 +5428,12 @@
        瞬間完成、也不會受限流或額度影響，是 OCR 截圖辨識暫時打不開時的可靠備援管道。
        跟 OCR 匯入共用同一套「批次新增、不扣現金」語意，也共用同一個 parseOcrJsonList()
        解析器（接受 code/symbol 兩種欄位名稱），只是資料來源改成使用者自己貼的文字。
+
+       畫面連動防呆：批次匯入／OCR 匯入這兩條路徑都全程包在 try/catch/finally 裡——就算
+       解析或寫入過程中有任何一步意外拋出例外，finally 也一定會呼叫 renderUI() 重新整個
+       畫面重繪一次（總覽卡片／圓餅圖／持股清單都在 renderUI() 內部，見下方 renderUI() 的
+       逐步 try/catch 拆解），確保「已匯入 N 筆」的訊息跟畫面上實際顯示的持股清單、總資產
+       數字永遠一致，不會出現「說已匯入但清單還是空的」這種訊息與畫面對不上的情況。
     ======================================================================== */
     function toggleJsonImportHelp() {
         const help = document.getElementById('json-import-help');
@@ -5423,8 +5449,9 @@
     }
 
     // [確認批次匯入]：讀取文字框內容 → 解析成 [{symbol, shares, cost}, ...] → 逐筆驗證後
-    // 直接批次寫入 appData.stocks，並呼叫 persistHoldings() 同步寫回 Firestore 雲端。
-    // 已經持有相同代號的直接跳過並提醒，不會自動加碼或覆蓋既有部位。
+    // 直接批次寫入 appData.stocks（唯一的持股陣列，全站只有這一份，跟總覽卡片、圓餅圖、
+    // 持股清單讀的是同一個變數，不會有第二份「holdings」變數存在），並呼叫 persistHoldings()
+    // 同步寫回 Firestore 雲端。已經持有相同代號的直接跳過並提醒，不會自動加碼或覆蓋既有部位。
     async function confirmImportJsonBatch() {
         const textarea = document.getElementById('json-import-textarea');
         const raw = textarea ? textarea.value.trim() : '';
@@ -5438,6 +5465,11 @@
             setJsonImportStatus('沒有解析出有效資料，請確認格式是陣列，且每筆都有代號（code）、股數（shares）、成本（cost）三個欄位，數值都要大於 0。', true);
             return;
         }
+
+        // 防呆：appData.stocks 理論上永遠是陣列，但萬一遇到還沒初始化完成就搶先操作的極端情況，
+        // 這裡先補一個安全的空陣列，絕對不能讓後面的 .push() 直接因為 undefined 而整個中斷、
+        // 導致畫面卡在「已解析但沒寫入」的狀態
+        if (!Array.isArray(appData.stocks)) appData.stocks = [];
 
         const toImport = [];
         const skippedExisting = [];
@@ -5461,29 +5493,38 @@
         );
         if (!proceed) return;
 
-        for (const item of toImport) {
-            const name = getCompanyName(item.symbol);
-            const eod = stockDayAllMap[item.symbol];
-            const price = eod && !isNaN(eod.close) ? eod.close : item.cost;
-            const newStock = {
-                symbol: item.symbol, name, shares: item.shares, cost: item.cost, price,
-                market_val: item.shares * price, priceSource: eod ? 'eod' : null,
-                buyDate: todayISODate(), dividendHistory: []
-            };
-            appData.stocks.push(newStock);
-        }
-        persistHoldings(); // 批次寫入後立刻同步到 Firestore 雲端，重新整理／換裝置登入都看得到
-        renderUI();
+        // try/catch/finally：不管中間任何一步（寫入 appData、算報價、抓產業分類）有沒有意外
+        // 拋出例外，finally 都保證會執行 renderUI()，讓總覽卡片／圓餅圖／持股清單三個地方
+        // 一定會跟目前的 appData.stocks 保持同步，不會停在匯入前的舊畫面
+        try {
+            for (const item of toImport) {
+                const name = getCompanyName(item.symbol);
+                const eod = stockDayAllMap[item.symbol];
+                const price = eod && !isNaN(eod.close) ? eod.close : item.cost;
+                const newStock = {
+                    symbol: item.symbol, name, shares: item.shares, cost: item.cost, price,
+                    market_val: item.shares * price, priceSource: eod ? 'eod' : null,
+                    buyDate: todayISODate(), dividendHistory: []
+                };
+                appData.stocks.push(newStock);
+            }
+            persistHoldings(); // 批次寫入後立刻同步到 Firestore 雲端，重新整理／換裝置登入都看得到
 
-        if (textarea) textarea.value = '';
-        for (const item of toImport) {
-            refreshIndustryInBackground(item.symbol);
-        }
-        triggerGlobalRefresh(false);
+            if (textarea) textarea.value = '';
+            for (const item of toImport) {
+                refreshIndustryInBackground(item.symbol);
+            }
+            triggerGlobalRefresh(false);
 
-        let doneMsg = `已匯入 ${toImport.length} 筆持股並同步至雲端。`;
-        if (skippedExisting.length) doneMsg += `（略過已持有的重複代號：${skippedExisting.join('、')}）`;
-        setJsonImportStatus(doneMsg, false);
+            let doneMsg = `已匯入 ${toImport.length} 筆持股並同步至雲端。`;
+            if (skippedExisting.length) doneMsg += `（略過已持有的重複代號：${skippedExisting.join('、')}）`;
+            setJsonImportStatus(doneMsg, false);
+        } catch (e) {
+            console.error('批次匯入過程發生錯誤，畫面仍會強制重新整理一次以反映目前實際資料', e);
+            setJsonImportStatus(`匯入過程中發生非預期錯誤：${e && e.message ? e.message : e}，請重新整理頁面確認持股清單是否正確，若有問題可以再匯入一次。`, true);
+        } finally {
+            renderUI(); // 保證：不管上面成功或中途出錯，這裡一定會用目前最新的 appData 重繪整個畫面
+        }
     }
 
     /* ========================================================================
@@ -5689,7 +5730,8 @@
 
     // [確認無誤，批次匯入這些持股]：讀取確認清單目前畫面上（使用者可能已手動修正過）的
     // 代號／股數／成本，逐筆驗證後批次加進 appData.stocks；已經持有相同代號的直接跳過並提醒，
-    // 不會自動加碼或覆蓋既有部位。純粹回填既有持股，不動現金。
+    // 不會自動加碼或覆蓋既有部位。純粹回填既有持股，不動現金。全程包在 try/finally 裡，
+    // 理由跟 confirmImportJsonBatch() 一樣：保證不管有沒有例外都會強制 renderUI() 重繪畫面。
     async function confirmImportOcrResults() {
         const rows = document.querySelectorAll('#ocr-result-list [data-ocr-row]');
         if (!rows.length) return;
@@ -5724,36 +5766,43 @@
         );
         if (!proceed) return;
 
-        for (const item of toImport) {
-            const name = getCompanyName(item.symbol);
-            const eod = stockDayAllMap[item.symbol];
-            const price = eod && !isNaN(eod.close) ? eod.close : item.cost;
-            const newStock = {
-                symbol: item.symbol, name, shares: item.shares, cost: item.cost, price,
-                market_val: item.shares * price, priceSource: eod ? 'eod' : null,
-                buyDate: todayISODate(), dividendHistory: []
-            };
-            appData.stocks.push(newStock);
+        if (!Array.isArray(appData.stocks)) appData.stocks = []; // 同樣的防呆：絕對不能讓 .push() 因為 undefined 而整段中斷
+
+        try {
+            for (const item of toImport) {
+                const name = getCompanyName(item.symbol);
+                const eod = stockDayAllMap[item.symbol];
+                const price = eod && !isNaN(eod.close) ? eod.close : item.cost;
+                const newStock = {
+                    symbol: item.symbol, name, shares: item.shares, cost: item.cost, price,
+                    market_val: item.shares * price, priceSource: eod ? 'eod' : null,
+                    buyDate: todayISODate(), dividendHistory: []
+                };
+                appData.stocks.push(newStock);
+            }
+            persistHoldings();
+
+            // 清空 OCR 面板，回到初始狀態，準備下一次辨識
+            ocrParsedResults = [];
+            renderOcrResults();
+            const previewWrap = document.getElementById('ocr-preview-wrap');
+            if (previewWrap) previewWrap.classList.add('hidden');
+
+            for (const item of toImport) {
+                refreshIndustryInBackground(item.symbol);
+            }
+            triggerGlobalRefresh(false);
+
+            let doneMsg = `已匯入 ${toImport.length} 筆持股。`;
+            if (skippedExisting.length) doneMsg += `（略過已持有的重複代號：${skippedExisting.join('、')}）`;
+            if (invalidRows.length) doneMsg += `（有 ${invalidRows.length} 列資料不完整，未匯入）`;
+            setOcrStatus(doneMsg, false);
+        } catch (e) {
+            console.error('OCR 批次匯入過程發生錯誤，畫面仍會強制重新整理一次以反映目前實際資料', e);
+            setOcrStatus(`匯入過程中發生非預期錯誤：${e && e.message ? e.message : e}，請重新整理頁面確認持股清單是否正確，若有問題可以再匯入一次。`, true);
+        } finally {
+            renderUI(); // 保證：不管上面成功或中途出錯，這裡一定會用目前最新的 appData 重繪整個畫面
         }
-        persistHoldings();
-        renderUI();
-
-        // 清空 OCR 面板，回到初始狀態，準備下一次辨識
-        ocrParsedResults = [];
-        renderOcrResults();
-        setOcrStatus('', false);
-        const previewWrap = document.getElementById('ocr-preview-wrap');
-        if (previewWrap) previewWrap.classList.add('hidden');
-
-        for (const item of toImport) {
-            refreshIndustryInBackground(item.symbol);
-        }
-        triggerGlobalRefresh(false);
-
-        let doneMsg = `已匯入 ${toImport.length} 筆持股。`;
-        if (skippedExisting.length) doneMsg += `（略過已持有的重複代號：${skippedExisting.join('、')}）`;
-        if (invalidRows.length) doneMsg += `（有 ${invalidRows.length} 列資料不完整，未匯入）`;
-        setOcrStatus(doneMsg, false);
     }
 
     /* ========================================================================
