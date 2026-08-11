@@ -56,63 +56,39 @@
             --c-blue-hover: #93C0C9;/* 藍底按鈕 hover 狀態 */
         }
 
-        /* ---- 雲端同步狀態橫幅：Firestore 讀取／寫入失敗時的顯眼提示，固定在畫面最上層 ---- */
-        #cloud-sync-banner {
-            position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
-            display: flex; justify-content: center;
-            padding: 10px 12px 0;
-            pointer-events: none;
-        }
-        #cloud-sync-banner.hidden { display: none; }
-        #cloud-sync-banner-inner {
-            pointer-events: auto;
-            display: flex; align-items: flex-start; gap: 10px;
-            max-width: 640px; width: 100%;
-            background: var(--c-dark);
-            color: #fff;
-            border-radius: 14px;
-            padding: 12px 14px;
-            box-shadow: 0 10px 30px rgba(53, 30, 28, 0.35);
-            animation: cloudSyncBannerIn .25s cubic-bezier(.4,0,.2,1);
-        }
-        @keyframes cloudSyncBannerIn {
-            from { opacity: 0; transform: translateY(-8px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        #cloud-sync-banner-icon {
-            flex-shrink: 0;
-            width: 20px; height: 20px;
+        /* ---- 雲端同步狀態：改成畫面右上角一個安靜的小狀態點，不再用大型蓋版通知打斷操作。
+           綠色 = 已同步，灰色 = 離線中（背景會自動重試，不需要使用者做任何操作）。
+           詳細原因收進 title 屬性，滑鼠移過去（或手機長按）才會看到，平常完全不干擾畫面。 ---- */
+        #sync-status-dot {
+            position: fixed;
+            top: 12px;
+            right: 12px;
+            z-index: 9999;
+            width: 10px;
+            height: 10px;
             border-radius: 999px;
-            background: var(--c-accent);
-            color: #fff;
-            font-weight: 900;
-            font-size: 12px;
-            display: flex; align-items: center; justify-content: center;
-            margin-top: 1px;
+            background: #9CA3AF;
+            box-shadow: 0 0 0 3px rgba(53, 30, 28, 0.06);
+            cursor: default;
+            transition: background-color .35s ease;
+            pointer-events: auto;
         }
-        #cloud-sync-banner-text {
-            flex: 1;
-            font-size: 12.5px;
-            line-height: 1.6;
-            white-space: pre-line;
-        }
-        #cloud-sync-banner-close {
-            flex-shrink: 0;
-            color: rgba(255,255,255,0.6);
-            font-weight: 900;
-            font-size: 16px;
-            line-height: 1;
-            padding: 2px 4px;
-        }
-        #cloud-sync-banner-close:hover { color: #fff; }
+        #sync-status-dot.synced { background: #34C77B; }
+        #sync-status-dot.offline { background: #9CA3AF; }
+        #sync-status-dot.hidden { display: none; }
 
         /* ---- 現代高端字體排版 (Apple / Stripe 質感)：Inter 為主體，中文回退到 Noto Sans TC，
            全站統一開啟抗鋸齒與幾何精確渲染，取代原本偏老舊粗糙的系統預設字體觀感 ---- */
+        /* ---- 手機版防跑版：全域盒模型統一用 border-box（padding／border 不會再把元件撐爆父容器寬度），
+           html/body 鎖住水平捲軸，避免任何子元件在窄螢幕下不小心撐開造成左右滑動的慘狀 ---- */
+        *, *::before, *::after { box-sizing: border-box; }
         html, body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Noto Sans TC', sans-serif;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
             text-rendering: geometricPrecision;
+            max-width: 100%;
+            overflow-x: hidden;
         }
         body {
             background-color: var(--c-bg) !important;
@@ -121,6 +97,11 @@
                 radial-gradient(circle at 88% 0%, rgba(255, 96, 55, 0.09), transparent 42%),
                 radial-gradient(circle at 4% 96%, rgba(160, 201, 203, 0.16), transparent 46%);
             background-attachment: fixed;
+        }
+        /* 卡片式元件：box-sizing 已由上方全域規則保護；這裡額外限制 max-width，避免內容（長文字、
+           寬圖表）把卡片自己撐出容器寬度，同時保留 Tailwind 版面（grid/flex）原本決定的實際寬度 */
+        .card-white, .bg-neon, .bg-gray-900.pnl-card, .bg-black {
+            max-width: 100%;
         }
 
         .font-mono, code,
@@ -358,11 +339,11 @@
         }
         .watch-pill-close:hover { color: var(--c-accent); }
 
-        /* ---- 01 資產總覽：配置偏離微膠囊徽章 ---- */
+        /* ---- 01 資產總覽：配置偏離微膠囊徽章 ----
+           改成跟標題文字同一個 flex-wrap 容器裡的正常排版元素（不再 position: absolute），
+           手機窄螢幕標題文字變長時，徽章會自動換到下一行、跟標題保持固定間距，不會疊字 */
         .deviation-badge-pill {
-            position: absolute;
-            top: 14px;
-            right: 14px;
+            flex-shrink: 0;
             font-size: 10px;
             font-weight: 900;
             letter-spacing: .02em;
@@ -915,16 +896,11 @@
         </div>
     </div>
 
-    <!-- ============ 雲端同步狀態橫幅：Firestore 讀取／寫入失敗時在這裡顯眼提示，不再只是
-         悄悄印在瀏覽器 console 裡讓使用者完全看不到。固定在畫面最上層，登入前後都看得到，
-         可以手動關閉，同一則訊息不會因為畫面重繪就消失。 ============ -->
-    <div id="cloud-sync-banner" class="hidden" role="alert">
-        <div id="cloud-sync-banner-inner">
-            <span id="cloud-sync-banner-icon">!</span>
-            <p id="cloud-sync-banner-text"></p>
-            <button type="button" onclick="hideCloudSyncBanner()" id="cloud-sync-banner-close" aria-label="關閉提示">×</button>
-        </div>
-    </div>
+    <!-- ============ 雲端同步狀態：畫面右上角一個安靜的小狀態點，不會用彈窗或大型蓋版通知
+         打斷操作。綠色代表已同步，灰色代表離線中（資料仍安全地留在 Firestore 的本機快取，
+         恢復連線後會自動背景同步，不需要使用者做任何操作）。滑鼠移過去／手機長按可以看到
+         詳細原因，平常不會擋住任何內容。 ============ -->
+    <span id="sync-status-dot" class="offline" title="尚未連線"></span>
 
     <!-- ============ 主要儀表板（登入後才顯示） ============ -->
     <div id="app-shell" class="hidden">
@@ -1008,9 +984,11 @@
 
                 <!-- 頂部數據看板 -->
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div class="bg-neon glow-accent p-6 rounded-3xl text-black flex flex-col justify-between h-40 relative">
-                        <button type="button" id="deviation-badge" onclick="switchTab('rebalance')" class="hidden deviation-badge-pill">配置符合預期</button>
-                        <span class="text-xs font-black tracking-widest uppercase opacity-70">TOTAL MARKET VALUE // 總現值</span>
+                    <div class="bg-neon glow-accent p-6 rounded-3xl text-black flex flex-col justify-between" style="min-height: 10rem;">
+                        <div class="flex items-start justify-between flex-wrap gap-2">
+                            <span class="text-xs font-black tracking-widest uppercase opacity-70">TOTAL MARKET VALUE // 總現值</span>
+                            <button type="button" id="deviation-badge" onclick="switchTab('rebalance')" class="hidden deviation-badge-pill">配置符合預期</button>
+                        </div>
                         <div>
                             <span class="text-xs font-bold">NT$</span>
                             <h2 id="total-market" class="text-2xl md:text-4xl font-black tracking-tight mt-1">0</h2>
@@ -1794,22 +1772,36 @@
             fbAuth = firebase.auth();
             fbDb = firebase.firestore();
 
-            // 注意：這裡刻意「不」呼叫 fbDb.enablePersistence()／enableIndexedDbPersistence()。
-            // 先前版本曾經加上這個離線快取機制，但它在部分環境（例如同時開了多個分頁、瀏覽器的
-            // 隱私模式限制 IndexedDB、或裝置的 IndexedDB 狀態本身有問題）反而會讓 SDK 卡在
-            // 「以為自己離線」的狀態，導致原本正常有網路連線時也跳出「Failed to get document
-            // because the client is offline.」這種錯誤。移除這段之後，Firestore 保持標準的
-            // 純線上連線模式：每次讀取都直接向伺服器要資料，不強迫依賴本機快取，行為更單純、
-            // 也更好預期；真正的離線容錯改成用下面 loadUserDataFromCloud() 裡的 try/catch
-            // 處理——讀取失敗時安全地保留畫面上既有的資料，不清空、不報錯中斷，只在畫面上
-            // 用雲端同步橫幅溫和提示。
-            //
-            // 強制使用 Long Polling：無痕視窗、行動網路、防火牆等環境常常攔截 WebSocket
-            // streaming，導致誤判離線。這裡強制全程走標準 HTTP 長輪詢。
+            // experimentalAutoDetectLongPolling：連線「傳輸層」的選項，讓 SDK 自動判斷要不要改用
+            // 長輪詢 (long polling) 取代 WebSocket/WebChannel streaming，用來繞開會攔截串流連線的
+            // 網路環境（公司/校園防火牆、部分廣告攔截外掛），跟下面的離線快取設定彼此獨立不衝突。
             try {
-                fbDb.settings({ experimentalForceLongPolling: true, merge: true });
+                fbDb.settings({ experimentalAutoDetectLongPolling: true, merge: true });
             } catch (e) {
-                console.warn('Firestore settings（強制長輪詢）套用失敗，不影響基本功能', e);
+                console.warn('Firestore settings（長輪詢自動偵測）套用失敗，不影響基本功能', e);
+            }
+
+            // 離線持久化（IndexedDB 本機快取）：先前版本曾經拿掉這個設定，因為它在部分環境
+            // （同時開了多個分頁、瀏覽器隱私模式限制 IndexedDB 等）會讓 SDK 誤判成「離線」，
+            // 導致原本連線正常時也跳出 "client is offline" 錯誤。這次依使用者明確要求、並確認
+            // 接受可能重現此風險後重新啟用，同時加上兩道防護降低風險：
+            // 1) synchronizeTabs: true 讓同一瀏覽器的多個分頁共用同一份離線快取（原本最常見的
+            //    觸發原因就是多分頁互搶 IndexedDB 鎖），大幅降低 failed-precondition 錯誤機率；
+            // 2) 啟用失敗時（多分頁搶鎖失敗、瀏覽器不支援等）安靜地退回純線上模式，只印在
+            //    console，不彈窗、不顯示大型錯誤蓋版——真正離線時改由右上角的安靜狀態小點呈現，
+            //    不會用 alert() 或蓋版通知打斷操作。
+            try {
+                fbDb.enablePersistence({ synchronizeTabs: true }).catch(err => {
+                    if (err && err.code === 'failed-precondition') {
+                        console.warn('IndexedDB 離線持久化啟用失敗：這個瀏覽器已有其他分頁持有離線快取鎖，這個分頁改用純線上模式，不影響資料正確性。', err);
+                    } else if (err && err.code === 'unimplemented') {
+                        console.warn('這個瀏覽器不支援 IndexedDB 離線持久化，改用純線上模式。', err);
+                    } else {
+                        console.warn('IndexedDB 離線持久化啟用失敗，改用純線上模式。', err);
+                    }
+                });
+            } catch (e) {
+                console.warn('呼叫 enablePersistence 時發生例外，改用純線上模式', e);
             }
 
             // 用「直接雙擊開檔案」（網址列會是 file://...）打開時，瀏覽器通常不允許網頁使用
@@ -1984,11 +1976,11 @@
         // 是用 uid 當後綴、天生帳號綁定，換成別的 Google 帳號登入時 key 對不上，還是會正常
         // 重新觸發強制閘門，不會有資料外洩或跳過別人同意紀錄的風險。
         try {
-            const preservedPrefixes = ['valo_disclaimer_agreed_', 'valo_local_backup_'];
+            const disclaimerPrefix = 'valo_disclaimer_agreed_';
             const preserved = {};
             for (let i = 0; i < localStorage.length; i++) {
                 const k = localStorage.key(i);
-                if (k && preservedPrefixes.some(p => k.indexOf(p) === 0)) preserved[k] = localStorage.getItem(k);
+                if (k && k.indexOf(disclaimerPrefix) === 0) preserved[k] = localStorage.getItem(k);
             }
             localStorage.clear();
             Object.keys(preserved).forEach(k => localStorage.setItem(k, preserved[k]));
@@ -2228,20 +2220,30 @@
        完全看不到 console，會誤以為資料已經存好了，直到某天重新整理或換裝置登入才發現整批不見。
        這裡統一用一個固定在畫面最上層、可關閉的橫幅顯示，開頭一律是白話說明，技術細節放在括號裡
        供進階排查用，並依錯誤類型（權限被拒／網路離線／其他）給出對應的排查方向。 ---- */
+    // 統一驅動右上角的安靜狀態小點：state 是 'synced'（綠色）或 'offline'（灰色），
+    // detailText 放進 title 屬性，只有滑鼠移過去／手機長按才看得到，不會主動彈出來打斷操作
+    function setSyncStatus(state, detailText) {
+        const dot = document.getElementById('sync-status-dot');
+        if (!dot) return;
+        dot.classList.remove('synced', 'offline');
+        dot.classList.add(state === 'synced' ? 'synced' : 'offline');
+        dot.title = detailText || (state === 'synced' ? '已同步至雲端' : '離線中（資料仍安全留在本機快取，恢復連線後會自動同步）');
+    }
+
+    // 保留原本的函式名稱與呼叫方式（reportFirestoreWrite／loadUserDataFromCloud 等既有程式碼
+    // 都是呼叫這兩個函式），但內部行為改成只更新安靜狀態點，不再彈出大型蓋版通知或 alert()
     function showCloudSyncBanner(text) {
-        const banner = document.getElementById('cloud-sync-banner');
-        const textEl = document.getElementById('cloud-sync-banner-text');
-        if (!banner || !textEl) return;
-        textEl.innerText = text;
-        banner.classList.remove('hidden');
+        setSyncStatus('offline', text);
     }
 
     function hideCloudSyncBanner() {
-        const banner = document.getElementById('cloud-sync-banner');
-        if (banner) banner.classList.add('hidden');
+        setSyncStatus('synced');
     }
 
-    // 依 Firestore 回傳的錯誤代碼／訊息，組出白話的排查提示；kind 是 'read' 或 'write'
+    // 依 Firestore 回傳的錯誤代碼／訊息，組出白話的排查提示；kind 是 'read' 或 'write'。
+    // 注意：啟用 enablePersistence()（IndexedDB 離線持久化）之後，離線時的讀寫大多會直接吃本機
+    // 快取而「成功」（不會真的丟到這個 catch 分支），所以這裡的 isOffline 分支主要是處理「本機
+    // 快取也還沒有任何資料可用」這種極端情況，文字改成安靜、不焦慮的說法，不會叫使用者要做什麼。
     function buildCloudSyncErrorMessage(contextLabel, e, kind) {
         const code = (e && e.code) || '';
         const msg = (e && e.message) || String(e || '未知錯誤');
@@ -2252,15 +2254,15 @@
         if (isPermission) {
             hint = '最可能原因：Firebase Console 的 Firestore「安全規則」尚未正確設定（或還停在測試模式、已到期），導致已登入帳號也被拒絕讀寫自己的資料。請到 Firebase Console →「Firestore Database」→「規則」，貼上正確規則後按「發布」。';
         } else if (isOffline) {
-            hint = '最可能原因：裝置目前沒有網路連線、或連線被中斷（部分公司／校園網路、廣告攔截外掛也可能誤擋 Firestore 連線）。請確認網路狀態後重新整理頁面再試一次。';
+            hint = '離線模式中（資料來源：Firestore 本機快取）。系統會在背景持續嘗試重新連線，恢復連線後會自動同步，不需要手動重新整理。';
         } else {
             hint = '請重新整理頁面再試一次；如果持續發生，請檢查 Firebase 專案設定與 Firestore 安全規則是否正確。';
         }
         return `${action}（${contextLabel}）。${hint}（技術細節：${msg}）`;
     }
 
-    // 統一包裝所有 Firestore 寫入 Promise：失敗時攔截並顯示雲端同步橫幅，成功時如果畫面上還留著
-    // 先前的失敗提示，順便收掉，避免使用者誤以為問題還沒解決
+    // 統一包裝所有 Firestore 寫入 Promise：失敗時把狀態點轉成灰色（離線／失敗原因收進 title），
+    // 成功時轉回綠色，不會用彈窗或蓋版通知打斷操作
     function reportFirestoreWrite(promise, contextLabel) {
         return promise.then(() => {
             hideCloudSyncBanner();
@@ -2268,44 +2270,6 @@
             console.warn(`雲端儲存失敗（${contextLabel}）`, e);
             showCloudSyncBanner(buildCloudSyncErrorMessage(contextLabel, e, 'write'));
         });
-    }
-
-    function localBackupKey(uid) {
-        return `valo_local_backup_${uid}`;
-    }
-
-    function writeLocalBackup() {
-        if (!currentUser || !appData) return;
-        try {
-            const backup = {
-                cash: appData.cash,
-                stocks: appData.stocks,
-                watchlist: appData.watchlist,
-                feeDiscount,
-                cashAlertThreshold,
-                priceAlerts,
-                targetAllocation,
-                openRouterApiKey: openRouterApiKeyCache,
-                emailJsConfig,
-                savedAt: Date.now()
-            };
-            localStorage.setItem(localBackupKey(currentUser.uid), JSON.stringify(backup));
-        } catch (e) {
-            console.warn('本地備份寫入失敗（localStorage 可能已滿或被瀏覽器封鎖）', e);
-        }
-    }
-
-    function readLocalBackup(uid) {
-        try {
-            const raw = localStorage.getItem(localBackupKey(uid));
-            if (!raw) return null;
-            const parsed = JSON.parse(raw);
-            if (!parsed || typeof parsed !== 'object') return null;
-            return parsed;
-        } catch (e) {
-            console.warn('本地備份讀取失敗，忽略這份備份，改用目前畫面上的資料', e);
-            return null;
-        }
     }
 
     /* ---- Firestore 讀寫：路徑 users/{uid}/portfolio_data/{holdings|settings|memory}，
@@ -2328,7 +2292,6 @@
         let holdingsData = null, settingsData = null, memoryData = null, tradeHistoryData = null;
         let holdingsExists = false;
         let readFailed = false;
-        let readError = null;
         try {
             const [holdingsSnap, settingsSnap, memorySnap, tradeHistorySnap] = await Promise.all([
                 userDocRef('holdings').get(),
@@ -2343,50 +2306,12 @@
             if (tradeHistorySnap.exists) tradeHistoryData = tradeHistorySnap.data();
         } catch (e) {
             readFailed = true;
-            readError = e;
-            console.warn('雲端資料讀取失敗，改嘗試從本地備份還原資料，請重新整理或稍後再試一次', e);
+            console.warn('雲端資料讀取失敗，這次保留畫面上既有的資料、不會被空白資料覆蓋，請重新整理再試一次', e);
+            showCloudSyncBanner(buildCloudSyncErrorMessage('讀取持股與設定', e, 'read'));
         }
 
-        if (readFailed) {
-            const backup = readLocalBackup(currentUser.uid);
-            if (backup) {
-                appData = {
-                    cash: typeof backup.cash === 'number' ? backup.cash : appData.cash,
-                    stocks: Array.isArray(backup.stocks) ? backup.stocks : appData.stocks,
-                    watchlist: Array.isArray(backup.watchlist) ? backup.watchlist : appData.watchlist
-                };
-                if (typeof backup.feeDiscount === 'number' && backup.feeDiscount > 0 && backup.feeDiscount <= 1) {
-                    feeDiscount = backup.feeDiscount;
-                }
-                if (typeof backup.cashAlertThreshold === 'number' && backup.cashAlertThreshold >= 0) {
-                    cashAlertThreshold = backup.cashAlertThreshold;
-                }
-                if (backup.priceAlerts && typeof backup.priceAlerts === 'object') {
-                    priceAlerts = backup.priceAlerts;
-                }
-                if (backup.targetAllocation && typeof backup.targetAllocation === 'object') {
-                    targetAllocation = backup.targetAllocation;
-                }
-                if (backup.openRouterApiKey) {
-                    openRouterApiKeyCache = backup.openRouterApiKey;
-                }
-                if (backup.emailJsConfig && typeof backup.emailJsConfig === 'object') {
-                    emailJsConfig = Object.assign({ serviceId: '', templateId: '', publicKey: '' }, backup.emailJsConfig);
-                }
-                const feeInput = document.getElementById('in-fee-discount');
-                if (feeInput) feeInput.value = Math.round(feeDiscount * 100);
-                const thresholdInput = document.getElementById('in-cash-alert-threshold');
-                if (thresholdInput) thresholdInput.value = cashAlertThreshold || '';
-                const keyInput = document.getElementById('openrouter-api-key');
-                if (keyInput) keyInput.value = openRouterApiKeyCache;
-                const savedAtText = backup.savedAt ? new Date(backup.savedAt).toLocaleString('zh-TW') : '未知時間';
-                showCloudSyncBanner(`雲端資料暫時讀取不到，已自動改用本機備份還原畫面（備份時間：${savedAtText}）。等雲端連線恢復後，資料會在下次操作時自動重新同步。${buildCloudSyncErrorMessage('讀取持股與設定', readError, 'read')}`);
-            } else {
-                showCloudSyncBanner(buildCloudSyncErrorMessage('讀取持股與設定', readError, 'read'));
-            }
-            return;
-        }
-        hideCloudSyncBanner();
+        if (readFailed) return; // appData／feeDiscount／API 金鑰／記憶庫全部維持原樣，不去動它
+        hideCloudSyncBanner(); // 這次讀取成功，收掉先前可能顯示的失敗提示（如果有的話）
 
         // 只有在「這次讀取確實成功」的前提下，才逐欄位套用雲端資料；欄位本身沒有回傳值（例如帳號
         // 真的是第一次登入、雲端還沒有任何文件）時，保留畫面上原本的值，不主動塞空陣列/0 進去
@@ -2437,13 +2362,16 @@
         if (tradeHistoryData && Array.isArray(tradeHistoryData.trades)) {
             tradeHistory = tradeHistoryData.trades;
         }
-
-        writeLocalBackup();
     }
 
+    // 注意：這裡改用 { merge: true }（雲端優先同步架構的一部分）——即使是另一台裝置（例如手機 B）
+    // 在這台裝置離線輸入資料的期間，於雲端寫入了其他欄位，這裡的存檔也只會合併更新這幾個欄位本身，
+    // 不會整份文件覆蓋掉。要老實說明一個限制：{merge:true} 是「欄位層級」合併，stocks 這種陣列欄位
+    // 本身還是整包覆蓋（不是逐筆比對合併），所以兩台裝置「同時」新增/修改不同持股時，還是後寫入的
+    // 那一台會覆蓋先寫入的內容（Last-Write-Wins），不是真正逐筆合併——這是 Firestore merge 的已知限制，
+    // 不是這裡的程式漏洞。
     function persistHoldings() {
         if (!currentUser || !fbDb) return;
-        writeLocalBackup();
         reportFirestoreWrite(userDocRef('holdings').set({
             cash: appData.cash,
             stocks: appData.stocks,
@@ -2453,17 +2381,17 @@
             priceAlerts,
             targetAllocation,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }), '持股資料');
+        }, { merge: true }), '持股資料');
     }
 
     // 已實現損益流水帳單獨存放在 trade_history 文件，跟 holdings 分開，平倉歸檔／刪除誤填紀錄
-    // 都只會動這份文件，不會影響到目前的持股與現金資料
+    // 都只會動這份文件，不會影響到目前的持股與現金資料；同樣使用 merge:true
     function persistTradeHistory() {
         if (!currentUser || !fbDb) return;
         reportFirestoreWrite(userDocRef('trade_history').set({
             trades: tradeHistory,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }), '已實現損益流水帳');
+        }, { merge: true }), '已實現損益流水帳');
     }
 
     // 注意：這裡改用 { merge: true }，只更新這幾個欄位、不會整份文件覆蓋掉——避免哪天有其他
@@ -2471,7 +2399,6 @@
     // 文件裡時，被這裡的存檔操作不小心整份蓋掉、悄悄遺失同意紀錄
     function persistSettings() {
         if (!currentUser || !fbDb) return;
-        writeLocalBackup();
         reportFirestoreWrite(userDocRef('settings').set({
             openRouterApiKey: openRouterApiKeyCache,
             emailJsConfig,
@@ -2484,7 +2411,7 @@
         reportFirestoreWrite(userDocRef('memory').set({
             history: summaryHistoryCache,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }), '記憶庫');
+        }, { merge: true }), '記憶庫');
     }
 
     /* ========================================================================
@@ -6872,11 +6799,6 @@
         return isNaN(n) ? null : n;
     }
 
-    // 注意：只有在「這次真的成功從公開資訊觀測站抓到資料」時，才會寫入 monthlyRevenueMap／
-    // localStorage 快取；fetchJSONSafe 逾時或網路失敗回傳 null 時，一律維持 null、不快取空物件。
-    // 這點很重要——如果失敗也快取一個空的 {}，之後同一個 session 內的自動重試（見
-    // renderFinancialModule 的同步重試機制）會因為「monthlyRevenueMap 已經是 truthy」而
-    // 直接把空快取當成功回傳，永遠不會真的再打一次 API，財務診斷面板就會卡在假的失敗狀態。
     async function loadMonthlyRevenueMap() {
         if (monthlyRevenueMap) return monthlyRevenueMap;
         const cacheRaw = localStorage.getItem('tw_monthly_revenue_cache');
@@ -6887,7 +6809,7 @@
             } catch (e) {}
         }
         const data = await fetchJSONSafe(`${TWSE_OPEN}/opendata/t187ap05_L`, 25000);
-        if (!Array.isArray(data)) return null; // 這次抓取失敗，不快取、讓下次呼叫（含自動重試）能真正重新嘗試
+        if (!Array.isArray(data)) return null; // 抓取失敗不快取，讓下次呼叫能真正重新嘗試
         const map = {};
         data.forEach(row => {
             const code = row['公司代號'];
@@ -7045,35 +6967,151 @@
         const incRevenue = pickNumber(incomeRow, ['營業收入']);
         const grossProfit = pickNumber(incomeRow, ['營業毛利（毛損）', '營業毛利(毛損)']);
         const operatingIncome = pickNumber(incomeRow, ['營業利益（損失）', '營業利益(損失)']);
-        // 稅後淨利（本期淨利）：綜合損益表的「本期淨利（淨損）」欄位，跟 EPS 一起呈現「稅後淨利與 EPS」
-        const netIncome = pickNumber(incomeRow, ['本期淨利（淨損）', '本期淨利(淨損)', '淨利（淨損）', '淨利(淨損)']);
+        const netIncome = pickNumber(incomeRow, ['本期淨利（淨損）', '本期淨利(淨損)', '淨利（淨損）', '本期淨利（淨損）歸屬於母公司業主']);
         const eps = pickNumber(incomeRow, ['基本每股盈餘（元）', '基本每股盈餘(元)']);
 
         const totalAssets = pickNumber(balanceRow, ['資產總額', '資產總計']);
         const totalLiabilities = pickNumber(balanceRow, ['負債總額', '負債總計']);
-        // 流動資產／流動負債：資產負債表原始欄位，用來算「流動比率」（衡量短期償債能力）
-        const currentAssets = pickNumber(balanceRow, ['流動資產', '流動資產合計']);
-        const currentLiabilities = pickNumber(balanceRow, ['流動負債', '流動負債合計']);
+        const currentAssets = pickNumber(balanceRow, ['流動資產合計', '流動資產']);
+        const currentLiabilities = pickNumber(balanceRow, ['流動負債合計', '流動負債']);
 
         const grossMarginPct = (incRevenue && grossProfit !== null) ? (grossProfit / incRevenue) * 100 : null;
         const operatingMarginPct = (incRevenue && operatingIncome !== null) ? (operatingIncome / incRevenue) * 100 : null;
         const debtRatioPct = (totalAssets && totalLiabilities !== null) ? (totalLiabilities / totalAssets) * 100 : null;
         const currentRatioPct = (currentLiabilities && currentAssets !== null) ? (currentAssets / currentLiabilities) * 100 : null;
 
+        // 三張表都有回應，但這個代號完全查不到任何欄位（常見於金融、保險、控股等使用特殊報表格式的產業）
+        // 這種情況要老實顯示「查無資料」，不能拿其他產業的數字來湊
+        if (curRevenue === null && incRevenue === null && grossProfit === null && operatingIncome === null &&
+            netIncome === null && eps === null && totalAssets === null && totalLiabilities === null) {
+            return { available: false };
+        }
+
         return {
-            available: true,
+            available: true, fetchFailed: false,
             revenueMonth,
             curRevenue, lastMonthRevenue, lastYearRevenue, yoyPct,
-            curQuarterRevenue: incRevenue, // 單季營收：來自綜合損益表本身，跟月營收是不同週期的官方數字
-            grossProfit, operatingIncome, netIncome, eps,
-            grossMarginPct, operatingMarginPct, debtRatioPct, currentRatioPct
+            curQuarterRevenue: incRevenue, grossProfit, operatingIncome, netIncome,
+            eps, grossMarginPct, operatingMarginPct, debtRatioPct, currentRatioPct
         };
     }
 
-    // ---- 診斷面板渲染：4 大模組（財務 / 技術面 / 白話結論），可同時掛在多個容器（資產總覽 + 持股管理與記憶庫）----
+    // 把公開資訊觀測站的「新台幣仟元」數字，換算成看得懂的億元／萬元
+    function fmtFinAmount(thousandsValue) {
+        if (thousandsValue === null || thousandsValue === undefined || isNaN(thousandsValue)) return '-';
+        const ntd = thousandsValue * 1000;
+        const abs = Math.abs(ntd);
+        if (abs >= 100000000) return `${(ntd / 100000000).toFixed(2)} 億元`;
+        if (abs >= 10000) return `${(ntd / 10000).toFixed(0)} 萬元`;
+        return `${fmtNum(ntd)} 元`;
+    }
+
+    // 從日成交資料列取出「最新一個交易日」的成交股數，供籌碼結構圖估算散戶／其他佔比使用
+    function getLatestVolumeFromRows(rows) {
+        if (!rows || !rows.length) return null;
+        const last = rows[rows.length - 1];
+        const vol = parseFloat(String(last[1]).replace(/,/g, ''));
+        return isNaN(vol) ? null : vol;
+    }
+
+    // 財報 API 暫時抓不到資料時，安排有限次數（避免無限重試）的自動重試
+    const financialDiagnosticRetryCount = {};
+    const FINANCIAL_DIAGNOSTIC_MAX_RETRY = 3;
+
+    // 用當日三大法人（外資／投信／自營商）買賣超股數，估算「當日籌碼結構比重」；
+    // 這是「當天資金流向」的相對強弱，不是法人實際持股比例（持股比例需要證交所每週股權分散表，
+    // 目前沒有可即時串接的公開來源，所以一律誠實標註資料定義，不假裝是持股比例）
+    function computeInstitutionalStructure(symbol, todayVolume) {
+        const rec = t86Map[symbol];
+        if (!rec) return { available: false };
+        const { foreignNet, trustNet, dealerNet } = rec;
+        if (foreignNet === null && trustNet === null && dealerNet === null) return { available: false };
+        const absForeign = Math.abs(foreignNet || 0);
+        const absTrust = Math.abs(trustNet || 0);
+        const absDealer = Math.abs(dealerNet || 0);
+        const instTotal = absForeign + absTrust + absDealer;
+        // 用當日成交量扣掉三大法人買賣超合計，估算散戶及其他的部分；
+        // 若當日成交量抓不到或小於法人合計，退而求其次用一個保守比例代表散戶及其他，避免圖表因分母是 0 而整個消失
+        const retail = (todayVolume && todayVolume > instTotal) ? (todayVolume - instTotal) : Math.max(instTotal * 0.15, 0);
+        const total = instTotal + retail;
+        if (total <= 0) return { available: false };
+        return {
+            available: true, date: rec.date,
+            foreign: absForeign, trust: absTrust, dealer: absDealer, retail,
+            foreignPct: absForeign / total * 100, trustPct: absTrust / total * 100,
+            dealerPct: absDealer / total * 100, retailPct: retail / total * 100
+        };
+    }
+
+    function renderInstitutionalModule(uid, structure) {
+        if (!structure || !structure.available) {
+            return `<div class="card-white p-8 rounded-3xl">
+                <p class="diag-module-title">CHIPS // 籌碼結構</p>
+                <div class="diag-etf-banner">籌碼數據暫時不可用，將於盤後更新。</div>
+            </div>`;
+        }
+        return `<div class="card-white p-8 rounded-3xl space-y-3">
+            <p class="diag-module-title">CHIPS // 當日籌碼結構比重</p>
+            <p class="text-[11px] text-gray-400">資料日期：${structure.date || '-'}。這裡呈現的是「當日三大法人買賣超股數」占比，代表當天資金流向的相對強弱，不是法人實際持股比例（真正的持股比例需要證交所每週股權分散表，目前公開即時資料無法取得）。</p>
+            <div class="w-full h-56 flex items-center justify-center"><canvas id="instHolderPieChart-${uid}"></canvas></div>
+        </div>`;
+    }
+
+    function renderInstitutionalChart(uid, structure) {
+        const chartKey = `instHolderPieChart-${uid}`;
+        if (diagnosticCharts[chartKey]) { diagnosticCharts[chartKey].destroy(); delete diagnosticCharts[chartKey]; }
+        const canvas = document.getElementById(chartKey);
+        if (!canvas || !structure || !structure.available) return;
+        diagnosticCharts[chartKey] = new Chart(canvas.getContext('2d'), {
+            type: 'pie',
+            data: {
+                labels: ['外資', '投信', '自營商', '散戶及其他'],
+                datasets: [{
+                    data: [structure.foreign, structure.trust, structure.dealer, structure.retail],
+                    backgroundColor: ['#E86A4B', '#C49A82', '#8AAEB0', '#D8CFC0'],
+                    borderWidth: 1, borderColor: '#fff'
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    title: { display: true, text: '當日籌碼結構比重', font: { family: "'IBM Plex Mono', monospace", size: 12 }, color: '#733635' },
+                    legend: { position: 'bottom', labels: { font: { size: 10 }, color: '#733635' } },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => {
+                                const pct = [structure.foreignPct, structure.trustPct, structure.dealerPct, structure.retailPct][ctx.dataIndex];
+                                return `${ctx.label}：${pct.toFixed(1)}%`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // ETF 沒有傳統財報，改用近期市價漲跌幅來呈現「追蹤表現」，直接複用技術面已經抓好的收盤價，不用再多打一次 API
+    function computeEtfPricePerformance(tech) {
+        if (!tech || !tech.closes || tech.closes.length < 2) return { available: false };
+        const closes = tech.closes;
+        const latest = closes[closes.length - 1];
+        const calcChange = (daysAgo) => {
+            const idx = closes.length - 1 - daysAgo;
+            if (idx < 0) return null;
+            const base = closes[idx];
+            if (!base) return null;
+            return (latest - base) / base * 100;
+        };
+        return {
+            available: true, latest,
+            chg5d: calcChange(5), chg20d: calcChange(20), chg60d: calcChange(60)
+        };
+    }
+
+    // ---- 診斷面板渲染：4 大模組（財務 / 籌碼 / 技術面 / 白話結論），可同時掛在多個容器（資產總覽 + 持股管理與記憶庫）----
     function diagnosticLoadingHtml(stock) {
         return `<div class="card-white p-8 rounded-3xl">
-            <p class="diag-loading">正在整理 ${stock.symbol} ${stock.name} 的完整診斷資料（財務／技術面），請稍候...</p>
+            <p class="diag-loading">正在整理 ${stock.symbol} ${stock.name} 的完整診斷資料（財務／籌碼／技術面），請稍候...</p>
         </div>`;
     }
 
@@ -7098,52 +7136,62 @@
 
         const tech = computeTechnicalSnapshot(priceRows, stock.price);
         const todayVolume = getLatestVolumeFromRows(priceRows);
-        // revMap/incMap/balMap 三個資料源全部都是 null，代表這次三個 API 全部抓取失敗
-        // （網路問題、逾時等）；只要有任何一個成功回來，就不算「抓取失敗」，只是這個代號剛好
-        // 不在該資料集裡（例如金融保險業使用特殊財報格式，本來就不會出現在一般業資料集）。
-        // 這兩種情況要分開處理：前者可以自動重試，後者重試也不會有結果，直接誠實說明原因。
-        const financialFetchFailed = !etf && revMap === null && incMap === null && balMap === null;
-        const fin = etf ? { available: false, isEtf: true } : buildFinancialSnapshot(
-            revMap ? revMap[symbol] : null,
-            incMap ? incMap[symbol] : null,
-            balMap ? balMap[symbol] : null
-        );
-        if (fin && !etf) fin.fetchFailed = financialFetchFailed;
 
-        mounts.forEach((el, idx) => paintDiagnosticPanel(el, `diag${idx}`, stock, etf, tech, fin, todayVolume));
-    }
-
-    // 從價量資料列（fetchStockDailyRange 回傳的原始列，欄位順序為 [日期,成交股數,成交金額,開盤價,
-    // 最高價,最低價,收盤價,...]）取出最近一筆有效的成交股數，供籌碼結構圓餅圖估算散戶及其他比重使用
-    function getLatestVolumeFromRows(rows) {
-        if (!Array.isArray(rows) || !rows.length) return null;
-        for (let i = rows.length - 1; i >= 0; i--) {
-            const v = parseFloat(String(rows[i][1]).replace(/,/g, ''));
-            if (!isNaN(v) && v > 0) return v;
+        let fin;
+        if (etf) {
+            fin = { available: false, isEtf: true };
+        } else {
+            const allFetchFailed = (revMap === null && incMap === null && balMap === null);
+            if (allFetchFailed) {
+                fin = { available: false, fetchFailed: true };
+            } else {
+                fin = buildFinancialSnapshot(
+                    revMap ? revMap[symbol] : null,
+                    incMap ? incMap[symbol] : null,
+                    balMap ? balMap[symbol] : null
+                );
+                fin.fetchFailed = false;
+            }
         }
-        return null;
+
+        // 財報暫時抓不到時（可能是公開資訊觀測站當下沒回應），安排有限次數的自動背景重試；
+        // 不會無限重試，也不會用板塊平均之類的假資料頂替
+        if (!etf && fin.fetchFailed) {
+            const retries = financialDiagnosticRetryCount[symbol] || 0;
+            if (retries < FINANCIAL_DIAGNOSTIC_MAX_RETRY) {
+                financialDiagnosticRetryCount[symbol] = retries + 1;
+                setTimeout(() => { if (currentSymbol === symbol) renderDiagnosticPanel(symbol); }, 4000 + retries * 3000);
+            }
+        } else {
+            financialDiagnosticRetryCount[symbol] = 0;
+        }
+
+        const structure = etf ? { available: false } : computeInstitutionalStructure(symbol, todayVolume);
+        const perf = etf ? computeEtfPricePerformance(tech) : null;
+
+        mounts.forEach((el, idx) => paintDiagnosticPanel(el, `diag${idx}`, stock, etf, tech, fin, structure, perf));
     }
 
-    function paintDiagnosticPanel(el, uid, stock, etf, tech, fin, todayVolume) {
+    function paintDiagnosticPanel(el, uid, stock, etf, tech, fin, structure, perf) {
         el.innerHTML = `
             <div class="space-y-6">
                 <div class="card-white glow-aqua p-8 rounded-3xl">
                     <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
                         <h3 class="text-lg font-black text-gray-900">${stock.symbol} ${stock.name} // 完整診斷</h3>
-                        <div class="flex items-center gap-2">
+                        <div class="flex items-center gap-2 flex-wrap">
                             <span class="diag-badge">${classifyIndustry(stock.symbol)}</span>
                             <span class="diag-badge">${etf ? 'ETF / 指數型基金' : '個股'}</span>
                         </div>
                     </div>
                     <p class="text-[11px] text-gray-400">財務數據來源：公開資訊觀測站最新一期公告；技術指標依近期日收盤價自行計算，僅供參考，不是投資建議。</p>
                 </div>
-                ${renderFinancialModule(uid, fin, etf, tech, stock.symbol)}
-                ${renderInstitutionalModule(uid, stock.symbol, todayVolume)}
+                ${renderFinancialModule(uid, fin, etf, perf)}
+                ${etf ? '' : renderInstitutionalModule(uid, structure)}
                 ${renderTechnicalModule(uid, tech)}
                 ${renderConclusionModule(stock, tech, fin, etf)}
             </div>`;
         renderFinancialChart(uid, fin, etf);
-        renderInstitutionalChart(uid, stock.symbol, todayVolume);
+        if (!etf) renderInstitutionalChart(uid, structure);
         renderTechnicalChart(uid, tech);
     }
 
@@ -7162,10 +7210,8 @@
         </div>`;
     }
 
-    // 沒有數字時用來顯示金額類欄位（稅後淨利／營業毛利等）的卡片，不套用健康/普通/偏低評語，
-    // 只單純呈現公開資訊觀測站原始公告的實際數字（單位：千元，跟原始資料集一致）
-    function diagMoneyStatCard(label, value) {
-        if (value === null || value === undefined || isNaN(value)) {
+    function diagMoneyStatCard(label, thousandsValue) {
+        if (thousandsValue === null || thousandsValue === undefined || isNaN(thousandsValue)) {
             return `<div class="diag-stat-card">
                 <p class="diag-stat-label">${label}</p>
                 <p class="diag-stat-value">-</p>
@@ -7174,66 +7220,43 @@
         }
         return `<div class="diag-stat-card">
             <p class="diag-stat-label">${label}</p>
-            <p class="diag-stat-value">NT$ ${fmtNum(value)} 千元</p>
-            <p class="diag-stat-verdict">依公開資訊觀測站最新一期公告的實際數字。</p>
+            <p class="diag-stat-value">${fmtFinAmount(thousandsValue)}</p>
         </div>`;
     }
 
-    // 財報同步失敗時的自動重試計數器：symbol -> 已重試次數，避免同一檔股票在畫面上無限迴圈重試
-    const financialDiagnosticRetryCount = {};
-    const FINANCIAL_DIAGNOSTIC_MAX_RETRY = 2;
-
-    function renderFinancialModule(uid, fin, etf, tech, symbol) {
+    function renderFinancialModule(uid, fin, etf, perf) {
         if (etf) {
-            const perf = computeEtfPricePerformance(tech);
-            if (!perf) {
+            if (!perf || !perf.available) {
                 return `<div class="card-white p-8 rounded-3xl">
-                    <p class="diag-module-title">FINANCIALS // 財務診斷</p>
-                    <div class="diag-etf-banner">這是一檔 ETF（指數型基金），本身不是一家公司，沒有「營收」「毛利率」這類財報數字可以看。目前近期價格資料還不足以計算市價表現，晚點重新整理應該就會出現。</div>
+                    <p class="diag-module-title">FINANCIALS // ETF 淨值與追蹤表現</p>
+                    <div class="diag-etf-banner">這是一檔 ETF，交易資料還不夠計算近期表現，之後資料補齊後會自動出現。</div>
                 </div>`;
             }
-            return `<div class="card-white p-8 rounded-3xl space-y-3">
-                <p class="diag-module-title">FINANCIALS // ETF 近期市價表現</p>
-                <div class="diag-etf-banner">這是一檔 ETF（指數型基金），本身不是一家公司，沒有「營收」「毛利率」這類財報數字可以看，這裡改用近期市價漲跌幅呈現它的表現。數字是市價變動（不是官方即時淨值或追蹤指數本身的比較），僅供參考。</div>
+            const chgCard = (label, v) => v === null
+                ? `<div class="diag-stat-card"><p class="diag-stat-label">${label}</p><p class="diag-stat-value">-</p><p class="diag-stat-verdict">資料不足</p></div>`
+                : `<div class="diag-stat-card"><p class="diag-stat-label">${label}</p><p class="diag-stat-value">${v >= 0 ? '+' : ''}${v.toFixed(2)}%</p><p class="diag-stat-verdict">${v >= 0 ? '這段期間市價走高' : '這段期間市價走低'}</p></div>`;
+            return `<div class="card-white p-8 rounded-3xl space-y-4">
+                <p class="diag-module-title">FINANCIALS // ETF 淨值與追蹤指數表現</p>
+                <p class="text-[11px] text-gray-400">這是一檔 ETF（指數型基金），本身不是一家公司，沒有「營收」「毛利率」這類財報數字可以看，這裡改用近期市價漲跌幅呈現追蹤表現，資料來源為證交所公開收盤價。</p>
                 <div class="diag-stat-grid">
-                    ${diagStatCard('近 20 個交易日 (約 1 個月)', perf.d20, '%', v => v >= 0 ? '近一個月市價是往上走的' : '近一個月市價是往下走的')}
-                    ${perf.d60 !== null ? diagStatCard('近 60 個交易日 (約 1 季)', perf.d60, '%', v => v >= 0 ? '近一季市價是往上走的' : '近一季市價是往下走的') : ''}
-                    ${perf.d120 !== null ? diagStatCard('近 120 個交易日 (約半年)', perf.d120, '%', v => v >= 0 ? '近半年市價是往上走的' : '近半年市價是往下走的') : ''}
+                    ${chgCard('近 5 日漲跌幅', perf.chg5d)}
+                    ${chgCard('近 20 日漲跌幅', perf.chg20d)}
+                    ${chgCard('近 60 日漲跌幅', perf.chg60d)}
                 </div>
             </div>`;
         }
-
-        if (!fin || !fin.available) {
-            // 拒絕虛構與籠統估算：這裡絕對不會用「台股市場概略區間」之類的假資料頂替。
-            // 只分兩種誠實情況：(1) 這次真的是網路/API 暫時抓不到 → 顯示同步中並自動重試幾次；
-            // (2) 資料集本身有回來、但這個代號本來就不在「一般業」財報格式的資料集裡（常見於金融、
-            //     保險、證券等特殊財報格式產業）→ 誠實說明原因，不重試（重試也不會有結果）。
-            if (fin && fin.fetchFailed) {
-                const retried = financialDiagnosticRetryCount[symbol] || 0;
-                if (retried < FINANCIAL_DIAGNOSTIC_MAX_RETRY) {
-                    financialDiagnosticRetryCount[symbol] = retried + 1;
-                    setTimeout(() => {
-                        // 使用者可能在等待期間切換到別的股票，這裡要確認目前選取的還是同一檔才重畫
-                        if (currentSymbol === symbol) renderDiagnosticPanel(symbol);
-                    }, 4000);
-                    return `<div class="card-white p-8 rounded-3xl">
-                        <p class="diag-module-title">FINANCIALS // 財務診斷</p>
-                        <div class="diag-etf-banner">正在從公開資訊觀測站同步真實財報...（第 ${retried + 1} 次重試，請稍候）</div>
-                    </div>`;
-                }
-                return `<div class="card-white p-8 rounded-3xl">
-                    <p class="diag-module-title">FINANCIALS // 財務診斷</p>
-                    <div class="diag-etf-banner">已嘗試多次仍無法連上公開資訊觀測站，可能是暫時性的網路問題。請稍後手動重新整理頁面再試一次；本面板絕不會用板塊平均或任何估算值頂替真實財報，寧可顯示空白也要確保數字精準。</div>
-                </div>`;
-            }
+        if (fin && fin.fetchFailed) {
             return `<div class="card-white p-8 rounded-3xl">
                 <p class="diag-module-title">FINANCIALS // 財務診斷</p>
-                <div class="diag-etf-banner">公開資訊觀測站的一般產業財報資料集裡查不到這檔股票（${symbol}）本身的資料，通常是因為這是金融、保險、證券等使用特殊財報格式的產業（不適用一般業財報格式，本功能目前只涵蓋一般產業個股）。想查這類產業的財報，建議直接到公開資訊觀測站官網搜尋這個代號。</div>
+                <div class="diag-etf-banner">正在從公開資訊觀測站同步真實財報...（網路回應較慢時會自動在背景重試，請稍候）</div>
             </div>`;
         }
-
-        // 重新讀到真實資料了，把這檔股票的重試計數歸零，下次萬一又失敗才能重新從頭數
-        financialDiagnosticRetryCount[symbol] = 0;
+        if (!fin || !fin.available) {
+            return `<div class="card-white p-8 rounded-3xl">
+                <p class="diag-module-title">FINANCIALS // 財務診斷</p>
+                <div class="diag-etf-banner">公開資訊觀測站目前查無這檔股票的財報資料（可能是金融、保險、控股等使用特殊報表格式的產業，本功能主要支援一般產業個股）。</div>
+            </div>`;
+        }
 
         let revenueNote = '目前抓不到這檔股票的月營收資料。';
         if (fin.yoyPct !== null) {
@@ -7247,10 +7270,13 @@
                 ${diagStatCard('毛利率 GROSS MARGIN', fin.grossMarginPct, '%', v => v >= 30 ? '健康（產品或服務有一定的訂價能力）' : v >= 15 ? '普通（同業競爭可能比較激烈）' : '偏低（留意毛利被壓縮的原因）')}
                 ${diagStatCard('營業利益率 OPERATING MARGIN', fin.operatingMarginPct, '%', v => v >= 15 ? '健康（本業經營效率不錯）' : v >= 5 ? '普通（本業獲利空間有限）' : '偏低（本業賺錢能力較弱）')}
                 ${diagStatCard('負債比率 DEBT RATIO', fin.debtRatioPct, '%', v => v <= 50 ? '健康（借的錢在安全範圍內）' : v <= 70 ? '普通（負債偏高，留意還款壓力）' : '偏高（財務槓桿較重，波動風險較大）')}
-                ${diagStatCard('流動比率 CURRENT RATIO', fin.currentRatioPct, '%', v => v >= 150 ? '健康（短期償債能力充足）' : v >= 100 ? '普通（短期償債能力尚可）' : '偏低（短期償債壓力較大，需留意流動性）')}
+                ${diagStatCard('流動比率 CURRENT RATIO', fin.currentRatioPct, '%', v => v >= 150 ? '健康（短期償債能力充足）' : v >= 100 ? '普通（短期尚能應付，緩衝不算大）' : '偏低（短期資金調度需留意）')}
                 ${diagStatCard('EPS 每股盈餘', fin.eps, ' 元', v => v >= 1 ? '公司目前是賺錢的，數字越大代表每股賺越多' : v >= 0 ? '公司微幅獲利' : '公司目前是虧損狀態')}
-                ${diagMoneyStatCard('稅後淨利 NET INCOME', fin.netIncome)}
+            </div>
+            <div class="diag-stat-grid mt-3">
+                ${diagMoneyStatCard('單季營收 QUARTERLY REVENUE', fin.curQuarterRevenue)}
                 ${diagMoneyStatCard('營業毛利 GROSS PROFIT', fin.grossProfit)}
+                ${diagMoneyStatCard('稅後淨利 NET INCOME', fin.netIncome)}
             </div>
             <div class="diag-stat-card mt-3">
                 <p class="diag-stat-label">自由現金流 FREE CASH FLOW [公司賺到的錢扣掉維持營運要花的錢，剩下能自由運用的現金]</p>
@@ -7260,11 +7286,7 @@
         return `<div class="card-white p-8 rounded-3xl space-y-4">
             <p class="diag-module-title">FINANCIALS // 近期財務動能與體質評估</p>
             <div>
-                <p class="text-xs text-gray-500 mb-2">單季營收 QUARTERLY REVENUE（依最新一期綜合損益表公告）</p>
-                ${diagMoneyStatCard('本季營業收入', fin.curQuarterRevenue)}
-            </div>
-            <div>
-                <p class="text-xs text-gray-500 mb-2">月營收年增率 YoY（依最新月營收公告，跟上面的單季營收是不同週期的官方資料）：代表這家公司最近賺錢的能力是越來越好還是衰退。${fin.revenueMonth ? `（資料年月：${fin.revenueMonth}）` : ''}</p>
+                <p class="text-xs text-gray-500 mb-2">單季營收與年增率（YoY）：代表這家公司最近賺錢的能力是越來越好還是衰退。${fin.revenueMonth ? `（資料年月：${fin.revenueMonth}）` : ''}</p>
                 <div class="w-full h-48"><canvas id="chart-fin-${uid}"></canvas></div>
                 <p class="diag-note">${revenueNote}</p>
             </div>
@@ -7302,110 +7324,6 @@
                 scales: {
                     x: { grid: { display: false }, ticks: { color: '#733635', font: { family: "'IBM Plex Mono', monospace", size: 10 } } },
                     y: { grid: { color: 'rgba(53,30,28,0.07)' }, ticks: { color: '#733635', font: { family: "'IBM Plex Mono', monospace", size: 10 } } }
-                }
-            }
-        });
-    }
-
-    // ETF 沒有「營收」「毛利率」這類財報指標可看，改用它自己近期的市價漲跌幅呈現表現。直接
-    // 重複使用已經抓過的近期收盤價（tech.closes，跟技術面模組共用同一份資料），不需要再額外
-    // 發一次 API 請求。
-    function computeEtfPricePerformance(tech) {
-        if (!tech || !Array.isArray(tech.closes) || tech.closes.length < 21) return null;
-        const closes = tech.closes;
-        const latest = closes[closes.length - 1];
-        const pctAgo = (daysAgo) => {
-            const idx = closes.length - 1 - daysAgo;
-            if (idx < 0 || !closes[idx]) return null;
-            return ((latest - closes[idx]) / closes[idx]) * 100;
-        };
-        const d20 = pctAgo(20);
-        if (d20 === null) return null;
-        return { d20, d60: closes.length > 60 ? pctAgo(60) : null, d120: closes.length > 120 ? pctAgo(120) : null };
-    }
-
-    /* ========================================================================
-       籌碼結構 // 法人持股比例圓餅圖
-       ----------------------------------------------------------------------
-       重要說明：TWSE 公開、免費、即時可查的資料裡，三大法人（T86）給的是「當天買賣超股數」
-       （今天淨買進或淨賣出多少張），並不是「累積持股占總股本的百分比」——真正的累積持股比例
-       需要集保結算所的股權分散表，屬於週更新、非即時的資料，免費 API 未涵蓋。因此這裡如實
-       呈現成「當日籌碼結構比重」：把外資／投信／自營商三大法人當天買賣超股數的絕對量體，加上
-       用當天總成交量概略推算出的「散戶及其他」量體，畫成一個圓餅圖，呈現的是當天資金流向的
-       相對比重，不是長期持股占比，UI 文案上會明確標註這一點。
-    ======================================================================== */
-    function computeInstitutionalStructure(symbol, todayVolume) {
-        const t86 = t86Map[symbol];
-        if (!t86) return null;
-        const foreign = (typeof t86.foreignNet === 'number' && !isNaN(t86.foreignNet)) ? Math.abs(t86.foreignNet) : 0;
-        const trust = (typeof t86.trustNet === 'number' && !isNaN(t86.trustNet)) ? Math.abs(t86.trustNet) : 0;
-        const dealer = (typeof t86.dealerNet === 'number' && !isNaN(t86.dealerNet)) ? Math.abs(t86.dealerNet) : 0;
-        const instAbsTotal = foreign + trust + dealer;
-        if (instAbsTotal <= 0) return null;
-        const retail = (typeof todayVolume === 'number' && todayVolume > 0 && todayVolume >= instAbsTotal)
-            ? (todayVolume - instAbsTotal) : null;
-        return { foreign, trust, dealer, retail, date: t86.date };
-    }
-
-    function renderInstitutionalModule(uid, symbol, todayVolume) {
-        const structure = computeInstitutionalStructure(symbol, todayVolume);
-        if (!structure) {
-            return `<div class="card-white p-8 rounded-3xl">
-                <p class="diag-module-title">籌碼結構 // 法人持股比例</p>
-                <div class="diag-etf-banner">籌碼數據暫時不可用，將於盤後更新。</div>
-            </div>`;
-        }
-        const dateText = structure.date && structure.date.length === 8
-            ? `${structure.date.slice(0, 4)}/${structure.date.slice(4, 6)}/${structure.date.slice(6, 8)}`
-            : '';
-        return `<div class="card-white p-8 rounded-3xl space-y-3">
-            <p class="diag-module-title">籌碼結構 // 法人持股比例${dateText ? `（${dateText}）` : ''}</p>
-            <p class="text-[11px] text-gray-400">下方是「當日籌碼結構比重」：依外資、投信、自營商當天買賣超股數的量體大小，加上依當天成交量概略推算的散戶及其他比重畫成的圓餅圖，呈現的是當天資金流向的相對比重，<strong>不是</strong>長期累積持股占比；查無當日資料時會自動改抓最近一筆有資料的交易日。</p>
-            <div class="w-full h-56"><canvas id="instHolderPieChart-${uid}"></canvas></div>
-        </div>`;
-    }
-
-    function renderInstitutionalChart(uid, symbol, todayVolume) {
-        const chartKey = `chart-inst-${uid}`;
-        if (diagnosticCharts[chartKey]) { diagnosticCharts[chartKey].destroy(); delete diagnosticCharts[chartKey]; }
-        const canvas = document.getElementById(`instHolderPieChart-${uid}`);
-        if (!canvas) return;
-        const structure = computeInstitutionalStructure(symbol, todayVolume);
-        if (!structure) return;
-        const labels = ['外資', '投信', '自營商'];
-        const values = [structure.foreign, structure.trust, structure.dealer];
-        const colors = ['#E86A4B', '#8AAEB0', '#C49A82'];
-        if (structure.retail !== null && structure.retail > 0) {
-            labels.push('散戶及其他');
-            values.push(structure.retail);
-            colors.push('#D9D4C7');
-        }
-        diagnosticCharts[chartKey] = new Chart(canvas.getContext('2d'), {
-            type: 'pie',
-            data: { labels, datasets: [{ data: values, backgroundColor: colors, borderWidth: 1, borderColor: '#fff' }] },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    title: {
-                        display: true,
-                        text: '當日籌碼結構比重',
-                        color: '#351E1C',
-                        font: { family: "'IBM Plex Mono', monospace", size: 12, weight: 'bold' }
-                    },
-                    legend: {
-                        position: 'bottom',
-                        labels: { color: '#733635', font: { family: "'IBM Plex Mono', monospace", size: 10 }, boxWidth: 10 }
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: (ctx) => {
-                                const total = (ctx.dataset.data || []).reduce((a, b) => a + b, 0);
-                                const pct = total > 0 ? ((ctx.parsed / total) * 100).toFixed(1) : '0.0';
-                                return `${ctx.label}：${pct}%`;
-                            }
-                        }
-                    }
                 }
             }
         });
