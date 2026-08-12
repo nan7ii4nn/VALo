@@ -20,6 +20,9 @@
 
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- 滾輪縮放／拖曳平移：hammerjs 處理觸控手勢、chartjs-plugin-zoom 掛在 Chart.js 上提供
+         wheel 縮放 + drag 平移，兩支腳本載入後會自動向 Chart.js 註冊，不需要額外手動 register。
+         「01 資產總覽」K 線圖與「05 短線交易引擎」投影連線圖共用同一份設定。 -->
     <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2"></script>
     <!-- 改用完整 D3 v7 套件（本來只載 d3-delaunay 子模組）：完整版一樣有 d3.Delaunay.from，
@@ -56,39 +59,13 @@
             --c-blue-hover: #93C0C9;/* 藍底按鈕 hover 狀態 */
         }
 
-        /* ---- 雲端同步狀態：改成畫面右上角一個安靜的小狀態點，不再用大型蓋版通知打斷操作。
-           綠色 = 已同步，灰色 = 離線中（背景會自動重試，不需要使用者做任何操作）。
-           詳細原因收進 title 屬性，滑鼠移過去（或手機長按）才會看到，平常完全不干擾畫面。 ---- */
-        #sync-status-dot {
-            position: fixed;
-            top: 12px;
-            right: 12px;
-            z-index: 9999;
-            width: 10px;
-            height: 10px;
-            border-radius: 999px;
-            background: #9CA3AF;
-            box-shadow: 0 0 0 3px rgba(53, 30, 28, 0.06);
-            cursor: default;
-            transition: background-color .35s ease;
-            pointer-events: auto;
-        }
-        #sync-status-dot.synced { background: #34C77B; }
-        #sync-status-dot.offline { background: #9CA3AF; }
-        #sync-status-dot.hidden { display: none; }
-
         /* ---- 現代高端字體排版 (Apple / Stripe 質感)：Inter 為主體，中文回退到 Noto Sans TC，
            全站統一開啟抗鋸齒與幾何精確渲染，取代原本偏老舊粗糙的系統預設字體觀感 ---- */
-        /* ---- 手機版防跑版：全域盒模型統一用 border-box（padding／border 不會再把元件撐爆父容器寬度），
-           html/body 鎖住水平捲軸，避免任何子元件在窄螢幕下不小心撐開造成左右滑動的慘狀 ---- */
-        *, *::before, *::after { box-sizing: border-box; }
         html, body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Noto Sans TC', sans-serif;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
             text-rendering: geometricPrecision;
-            max-width: 100%;
-            overflow-x: hidden;
         }
         body {
             background-color: var(--c-bg) !important;
@@ -97,11 +74,6 @@
                 radial-gradient(circle at 88% 0%, rgba(255, 96, 55, 0.09), transparent 42%),
                 radial-gradient(circle at 4% 96%, rgba(160, 201, 203, 0.16), transparent 46%);
             background-attachment: fixed;
-        }
-        /* 卡片式元件：box-sizing 已由上方全域規則保護；這裡額外限制 max-width，避免內容（長文字、
-           寬圖表）把卡片自己撐出容器寬度，同時保留 Tailwind 版面（grid/flex）原本決定的實際寬度 */
-        .card-white, .bg-neon, .bg-gray-900.pnl-card, .bg-black {
-            max-width: 100%;
         }
 
         .font-mono, code,
@@ -339,11 +311,11 @@
         }
         .watch-pill-close:hover { color: var(--c-accent); }
 
-        /* ---- 01 資產總覽：配置偏離微膠囊徽章 ----
-           改成跟標題文字同一個 flex-wrap 容器裡的正常排版元素（不再 position: absolute），
-           手機窄螢幕標題文字變長時，徽章會自動換到下一行、跟標題保持固定間距，不會疊字 */
+        /* ---- 01 資產總覽：配置偏離微膠囊徽章 ---- */
         .deviation-badge-pill {
-            flex-shrink: 0;
+            position: absolute;
+            top: 14px;
+            right: 14px;
             font-size: 10px;
             font-weight: 900;
             letter-spacing: .02em;
@@ -896,12 +868,6 @@
         </div>
     </div>
 
-    <!-- ============ 雲端同步狀態：畫面右上角一個安靜的小狀態點，不會用彈窗或大型蓋版通知
-         打斷操作。綠色代表已同步，灰色代表離線中（資料仍安全地留在 Firestore 的本機快取，
-         恢復連線後會自動背景同步，不需要使用者做任何操作）。滑鼠移過去／手機長按可以看到
-         詳細原因，平常不會擋住任何內容。 ============ -->
-    <span id="sync-status-dot" class="offline" title="尚未連線"></span>
-
     <!-- ============ 主要儀表板（登入後才顯示） ============ -->
     <div id="app-shell" class="hidden">
     <div class="md:flex min-h-screen">
@@ -984,11 +950,9 @@
 
                 <!-- 頂部數據看板 -->
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div class="bg-neon glow-accent p-6 rounded-3xl text-black flex flex-col justify-between" style="min-height: 10rem;">
-                        <div class="flex items-start justify-between flex-wrap gap-2">
-                            <span class="text-xs font-black tracking-widest uppercase opacity-70">TOTAL MARKET VALUE // 總現值</span>
-                            <button type="button" id="deviation-badge" onclick="switchTab('rebalance')" class="hidden deviation-badge-pill">配置符合預期</button>
-                        </div>
+                    <div class="bg-neon glow-accent p-6 rounded-3xl text-black flex flex-col justify-between h-40 relative">
+                        <button type="button" id="deviation-badge" onclick="switchTab('rebalance')" class="hidden deviation-badge-pill">配置符合預期</button>
+                        <span class="text-xs font-black tracking-widest uppercase opacity-70">TOTAL MARKET VALUE // 總現值</span>
                         <div>
                             <span class="text-xs font-bold">NT$</span>
                             <h2 id="total-market" class="text-2xl md:text-4xl font-black tracking-tight mt-1">0</h2>
@@ -1134,43 +1098,6 @@
 
                             <p class="text-[11px] text-gray-400 pt-2 border-t border-gray-100">買入自動扣款：股數 × 買入單價（單價本身已含手續費，不會再額外加算）。賣出／刪除自動退款：股數 × 現價 − 手續費 − 證交稅（一般股票 0.3%、ETF 0.1%），淨額會加回現金。手續費折數請至<button type="button" onclick="openSettingsModal()" class="underline hover:text-black font-bold">[ 系統與 API 設定 ]</button>調整。</p>
                             <!-- in-fee-discount 輸入框已移至系統與 API 設定 Modal，id 不變，updateFeeDiscount() 邏輯不受影響 -->
-
-                            <!-- JSON / 文字批次快速匯入：不靠任何 AI 或外部 API，使用者自己貼上（或請任何 AI
-                                 工具幫忙轉換成）標準 JSON 陣列，前端直接解析並批次寫入，速度最快、也最不會
-                                 受限流／額度影響，適合當 AI 截圖辨識暫時打不開時的備援匯入方式。 -->
-                            <div class="border border-gray-200 rounded-xl p-4 space-y-2" id="json-import-zone">
-                                <div class="flex items-center justify-between gap-2 flex-wrap">
-                                    <p class="text-xs font-bold text-gray-600">JSON / 文字批次快速匯入</p>
-                                    <button type="button" onclick="toggleJsonImportHelp()" class="text-xs font-black bg-gray-100 hover:bg-gray-200 text-gray-700 w-6 h-6 rounded-full transition flex items-center justify-center flex-shrink-0" aria-label="格式說明">?</button>
-                                </div>
-                                <div id="json-import-help" class="hidden text-[11px] text-gray-400 bg-gray-50 rounded-lg p-3 space-y-1">
-                                    <p>貼上陣列格式的資料，每筆需要包含代號（code 或 symbol）、股數（shares）、成本（cost）三個欄位，例如：</p>
-                                    <p class="font-mono text-gray-600 break-all">[{"code":"0050","shares":50,"cost":76.4},{"code":"2618","shares":1000,"cost":9.9}]</p>
-                                    <p>可以直接請任何 AI 聊天工具把你的庫存截圖或對帳單文字轉換成這個格式，再整段貼過來即可；不會自動扣現金，純粹回填既有持股。</p>
-                                </div>
-                                <textarea id="json-import-textarea" rows="4" placeholder='貼上陣列格式的資料，例如：[{&quot;code&quot;: &quot;0050&quot;, &quot;shares&quot;: 50, &quot;cost&quot;: 76.4}, {&quot;code&quot;: &quot;2618&quot;, &quot;shares&quot;: 1000, &quot;cost&quot;: 9.9}]' class="w-full bg-gray-50 border border-gray-200 p-3 rounded-xl text-xs font-mono text-gray-900 focus:outline-none focus:border-black resize-y"></textarea>
-                                <button type="button" onclick="confirmImportJsonBatch()" class="w-full bg-black text-white font-black py-3 rounded-xl uppercase tracking-wider hover:bg-gray-800 transition text-sm">確認批次匯入</button>
-                                <p id="json-import-status-note" class="text-xs text-gray-500"></p>
-                            </div>
-
-                            <!-- 截圖 OCR 智慧辨識匯入：改用雲端 AI 視覺模型（透過使用者自己的 OpenRouter 金鑰），
-                                 直接看圖辨識券商庫存截圖裡的表格文字，準確度比純本地端 OCR 高很多，尤其是
-                                 對齊跑版、字體很小的表格截圖。辨識結果一樣先進可編輯確認清單，核對無誤才批次
-                                 匯入，不會自動扣現金（純粹回填既有持股，不是今天的買賣交易）。 -->
-                            <div class="border border-dashed border-gray-300 rounded-xl p-4 space-y-2" id="ocr-drop-zone">
-                                <div class="flex items-center justify-between gap-2 flex-wrap">
-                                    <p class="text-xs font-bold text-gray-600">截圖 OCR 智慧辨識匯入（雲端 AI 視覺辨識）</p>
-                                    <button type="button" id="ocr-upload-btn" onclick="document.getElementById('ocr-image-input').click()" class="text-xs font-black bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-full transition whitespace-nowrap">上傳截圖</button>
-                                    <input type="file" id="ocr-image-input" accept="image/*" class="hidden" onchange="handleOcrImageSelect(this)">
-                                </div>
-                                <p class="text-[11px] text-gray-400">上傳（或在此頁按 Ctrl+V／⌘+V 貼上）你的券商 App 庫存明細截圖，AI 會自動幫你辨識出每一列的股票代號、股數、成本，整理成下方可編輯的清單，核對無誤後再一鍵批次匯入，不會自動從現金扣款。需要先在<button type="button" onclick="openSettingsModal()" class="underline hover:text-black font-bold">[ 系統與 API 設定 ]</button>填好 OpenRouter API 金鑰（免費申請，不用綁信用卡）。若辨識暫時失敗（額度限流、網路被擋等），可改用上方「JSON / 文字批次快速匯入」。</p>
-                                <div id="ocr-preview-wrap" class="hidden">
-                                    <img id="ocr-preview-img" class="max-h-40 rounded-lg border border-gray-200" alt="截圖預覽">
-                                </div>
-                                <p id="ocr-status-note" class="text-xs text-gray-500"></p>
-                                <div id="ocr-result-list" class="space-y-2"></div>
-                                <button type="button" id="ocr-import-btn" onclick="confirmImportOcrResults()" class="hidden w-full bg-black text-white font-black py-3 rounded-xl uppercase tracking-wider hover:bg-gray-800 transition text-sm">確認無誤，批次匯入這些持股</button>
-                            </div>
 
                             <div id="holdings-manage" class="divide-y divide-gray-100 text-sm"></div>
                         </div>
@@ -1380,7 +1307,34 @@
                         <div class="chart-tall-wrap chart-tall-wrap-sm">
                             <canvas id="st-projection-chart"></canvas>
                         </div>
+                        <p class="text-[10px] text-gray-400">圖表支援滑鼠滾輪縮放、按住拖曳平移（手機用兩指縮放/拖曳），雙擊圖表可以重設回預設檢視。</p>
+                        <p id="st-holding-pnl-note" class="hidden text-xs text-gray-600 p-3 rounded-xl bg-gray-50 border border-gray-100" style="line-height:1.6;"></p>
                         <div id="st-ai-notes" class="space-y-2"></div>
+
+                        <!-- 加碼試算 (DCA / Pyramiding Calculator)：輸入預計加碼的價格與股數，
+                             即時算出加碼後的新平均成本價，以及以新均價計算在現價／目標價的損益變化 -->
+                        <details class="card-white rounded-2xl border border-gray-100">
+                            <summary class="detail-card-summary p-5">
+                                <h3 class="text-xs font-bold tracking-widest text-gray-400 uppercase">PYRAMIDING // 加碼試算</h3>
+                                <span class="detail-card-chevron">&#9656;</span>
+                            </summary>
+                            <div class="px-5 pb-5 space-y-3">
+                                <p class="text-[11px] text-gray-400">輸入「預計加碼的價格與股數」，試算加碼後的新平均成本，以及對目前損益與目標價期望報酬的影響。若這檔標的目前沒有實際持股，會改用上方試算欄位裡的「持有股數／買入單價」當作加碼前的基準。</p>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label class="text-xs text-gray-500 font-bold">預計加碼股數</label>
+                                        <input id="pyr-add-shares" type="number" min="1" placeholder="例如 1000" class="w-full bg-gray-50 border border-gray-200 p-3 rounded-xl text-sm text-gray-900 focus:outline-none focus:border-black mt-1">
+                                    </div>
+                                    <div>
+                                        <label class="text-xs text-gray-500 font-bold">預計加碼價格</label>
+                                        <input id="pyr-add-price" type="number" step="0.01" min="0" placeholder="例如 現價或更高" class="w-full bg-gray-50 border border-gray-200 p-3 rounded-xl text-sm text-gray-900 focus:outline-none focus:border-black mt-1">
+                                    </div>
+                                </div>
+                                <button type="button" onclick="calcPyramidAverage()" class="w-full bg-gray-900 text-white text-xs font-black py-3 rounded-xl uppercase tracking-wider hover:bg-gray-800 transition">試算加碼後新均價</button>
+                                <div id="pyr-result" class="hidden space-y-3 pt-2"></div>
+                            </div>
+                        </details>
+
                         <button type="button" onclick="copyShortTermSummary()" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold py-3 rounded-lg transition">一鍵複製短線摘要卡</button>
                     </div>
 
@@ -1772,38 +1726,6 @@
             fbAuth = firebase.auth();
             fbDb = firebase.firestore();
 
-            // experimentalAutoDetectLongPolling：連線「傳輸層」的選項，讓 SDK 自動判斷要不要改用
-            // 長輪詢 (long polling) 取代 WebSocket/WebChannel streaming，用來繞開會攔截串流連線的
-            // 網路環境（公司/校園防火牆、部分廣告攔截外掛），跟下面的離線快取設定彼此獨立不衝突。
-            try {
-                fbDb.settings({ experimentalAutoDetectLongPolling: true, merge: true });
-            } catch (e) {
-                console.warn('Firestore settings（長輪詢自動偵測）套用失敗，不影響基本功能', e);
-            }
-
-            // 離線持久化（IndexedDB 本機快取）：先前版本曾經拿掉這個設定，因為它在部分環境
-            // （同時開了多個分頁、瀏覽器隱私模式限制 IndexedDB 等）會讓 SDK 誤判成「離線」，
-            // 導致原本連線正常時也跳出 "client is offline" 錯誤。這次依使用者明確要求、並確認
-            // 接受可能重現此風險後重新啟用，同時加上兩道防護降低風險：
-            // 1) synchronizeTabs: true 讓同一瀏覽器的多個分頁共用同一份離線快取（原本最常見的
-            //    觸發原因就是多分頁互搶 IndexedDB 鎖），大幅降低 failed-precondition 錯誤機率；
-            // 2) 啟用失敗時（多分頁搶鎖失敗、瀏覽器不支援等）安靜地退回純線上模式，只印在
-            //    console，不彈窗、不顯示大型錯誤蓋版——真正離線時改由右上角的安靜狀態小點呈現，
-            //    不會用 alert() 或蓋版通知打斷操作。
-            try {
-                fbDb.enablePersistence({ synchronizeTabs: true }).catch(err => {
-                    if (err && err.code === 'failed-precondition') {
-                        console.warn('IndexedDB 離線持久化啟用失敗：這個瀏覽器已有其他分頁持有離線快取鎖，這個分頁改用純線上模式，不影響資料正確性。', err);
-                    } else if (err && err.code === 'unimplemented') {
-                        console.warn('這個瀏覽器不支援 IndexedDB 離線持久化，改用純線上模式。', err);
-                    } else {
-                        console.warn('IndexedDB 離線持久化啟用失敗，改用純線上模式。', err);
-                    }
-                });
-            } catch (e) {
-                console.warn('呼叫 enablePersistence 時發生例外，改用純線上模式', e);
-            }
-
             // 用「直接雙擊開檔案」（網址列會是 file://...）打開時，瀏覽器通常不允許網頁使用
             // indexedDB / localStorage 來源隔離儲存，Firebase Auth 預設的持久化機制會直接噴錯，
             // 連 Email/密碼登入都會壞掉。這裡改成不持久化登入狀態（每次重新整理都要重新登入），
@@ -1872,29 +1794,6 @@
     // 直接在 login-screen／app-shell 之間切換就好，不用讓遮罩再跳出來一次
     let authResolvedOnce = false;
 
-    /* ------------------------------------------------------------------------
-       免責聲明同意狀態：本地快取（依帳號 UID 區分）
-       ------------------------------------------------------------------------
-       雲端 Firestore 的 settings 文件（disclaimerAgreed 欄位）本來就是「這個帳號是否已同意」
-       的權威資料，但如果剛好遇到雲端讀取失敗（離線、Firestore 規則問題、網路不穩），單靠雲端
-       判斷就會誤把「已經同意過的老帳號」當成新帳號，逼使用者重新看一次免責聲明、重新勾選——
-       這裡額外用 localStorage 存一份「這個 UID 是否同意過」的本地快取當第二道保險：
-       - key 用 'valo_disclaimer_agreed_' + uid，天生就是「帳號綁定」，換一個 Google 帳號登入、
-         或全新註冊的帳號，因為 uid 不同、localStorage 裡完全沒有對應的 key，一樣會正常觸發
-         強制閘門，不會有「別人同意過我就自動跳過」的外洩風險。
-       - 只要雲端確認同意、或本地快取顯示同意過，兩者任一為真就跳過強制閘門，讓同一個帳號
-         之後不管是重新整理、重新登入、或剛好那次雲端連線不穩，都不會被迫重複勾選。
-    ------------------------------------------------------------------------ */
-    function disclaimerLocalKey(uid) {
-        return 'valo_disclaimer_agreed_' + uid;
-    }
-    function readDisclaimerLocalFlag(uid) {
-        try { return localStorage.getItem(disclaimerLocalKey(uid)) === 'true'; } catch (e) { return false; }
-    }
-    function writeDisclaimerLocalFlag(uid) {
-        try { localStorage.setItem(disclaimerLocalKey(uid), 'true'); } catch (e) { /* 部分隱私瀏覽模式可能會擋，忽略即可 */ }
-    }
-
     async function handleAuthStateChanged(user) {
         currentUser = user;
         const overlay = document.getElementById('loading-overlay');
@@ -1914,14 +1813,8 @@
 
             // 嚴謹二分法：讀完雲端資料、確認 disclaimerAgreed 狀態後，才決定要不要收起遮罩、
             // 要不要打開 app-shell——這兩件事绝對不會在確認同意狀態之前發生。
-            // hasAgreed 同時看雲端資料（disclaimerAgreed）與本地快取（readDisclaimerLocalFlag），
-            // 任一個為真就視為已同意，兩者互為備援：雲端是長期權威來源，本地快取則確保網路
-            // 不穩、Firestore 暫時讀取失敗時，同一個帳號也不會被迫重新看一次免責聲明。
-            const hasAgreed = disclaimerAgreed === true || readDisclaimerLocalFlag(user.uid);
+            const hasAgreed = disclaimerAgreed === true;
             if (hasAgreed) {
-                // 兩邊只要有一邊確認同意過，就順便把本地快取補齊／刷新一次時效，讓下次即使
-                // 雲端剛好讀取失敗，也還是能靠這份本地紀錄跳過強制閘門
-                writeDisclaimerLocalFlag(user.uid);
                 // 情境 A：這個帳號已經同意過——收起遮罩、正式顯示主儀表板，才開始渲染看板／讀股價
                 if (overlay) overlay.classList.add('hidden');
                 document.getElementById('app-shell').classList.remove('hidden');
@@ -1967,24 +1860,7 @@
         cashAlertThreshold = 0;
         const keyInput = document.getElementById('openrouter-api-key');
         if (keyInput) keyInput.value = '';
-        // 登出時清空 localStorage：公開市場資料快取（公司名冊等）、上一位使用者可能殘留的任何
-        // 暫存痕跡都要清乾淨，確保共用裝置換帳號登入不會外洩上一位使用者的資料。
-        // 但「valo_disclaimer_agreed_<uid>」這組帳號綁定的免責聲明同意紀錄要刻意保留下來——
-        // 這是本地端的第二道保險（見 handleAuthStateChanged 裡的 hasAgreed 判斷），如果每次
-        // 登出都整批清掉，會直接讓「同一個帳號不用每次都重新勾選」這件事失效，下次同一個帳號
-        // 重新登入、剛好雲端讀取又不順的話，一樣會被迫重新看一次免責聲明。因為這組 key 本身
-        // 是用 uid 當後綴、天生帳號綁定，換成別的 Google 帳號登入時 key 對不上，還是會正常
-        // 重新觸發強制閘門，不會有資料外洩或跳過別人同意紀錄的風險。
-        try {
-            const disclaimerPrefix = 'valo_disclaimer_agreed_';
-            const preserved = {};
-            for (let i = 0; i < localStorage.length; i++) {
-                const k = localStorage.key(i);
-                if (k && k.indexOf(disclaimerPrefix) === 0) preserved[k] = localStorage.getItem(k);
-            }
-            localStorage.clear();
-            Object.keys(preserved).forEach(k => localStorage.setItem(k, preserved[k]));
-        } catch (e) { /* 部分瀏覽器隱私模式可能會擋，忽略即可 */ }
+        try { localStorage.clear(); } catch (e) { /* 部分瀏覽器隱私模式可能會擋，忽略即可 */ }
     }
 
     /* ------------------------------------------------------------------------
@@ -2091,17 +1967,12 @@
 
         disclaimerAgreed = true;
         closeDisclaimerModal();
-        if (currentUser) {
-            // 本地快取（依 UID）先寫，就算接下來的雲端寫入剛好遇到離線／規則問題，這個帳號
-            // 之後重新整理或重新登入，也還是能靠這份本地紀錄跳過強制閘門，不用重新勾選一次
-            writeDisclaimerLocalFlag(currentUser.uid);
-        }
         if (currentUser && fbDb) {
-            reportFirestoreWrite(userDocRef('settings').set({
+            userDocRef('settings').set({
                 disclaimerAgreed: true,
                 disclaimerAgreedAt: firebase.firestore.FieldValue.serverTimestamp(),
                 updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-            }, { merge: true }), '免責聲明同意紀錄');
+            }, { merge: true }).catch(e => console.warn('雲端儲存失敗（免責聲明同意紀錄）', e));
         }
 
         // 零內容外洩關卡的最後一步：寫入同意紀錄、關閉 Modal 之後，這裡才第一次把 app-shell 的
@@ -2216,62 +2087,6 @@
         if (fbAuth) await fbAuth.signOut();
     }
 
-    /* ---- 雲端同步狀態橫幅：Firestore 讀取／寫入失敗時不能只是 console.warn 悄悄吞掉——使用者
-       完全看不到 console，會誤以為資料已經存好了，直到某天重新整理或換裝置登入才發現整批不見。
-       這裡統一用一個固定在畫面最上層、可關閉的橫幅顯示，開頭一律是白話說明，技術細節放在括號裡
-       供進階排查用，並依錯誤類型（權限被拒／網路離線／其他）給出對應的排查方向。 ---- */
-    // 統一驅動右上角的安靜狀態小點：state 是 'synced'（綠色）或 'offline'（灰色），
-    // detailText 放進 title 屬性，只有滑鼠移過去／手機長按才看得到，不會主動彈出來打斷操作
-    function setSyncStatus(state, detailText) {
-        const dot = document.getElementById('sync-status-dot');
-        if (!dot) return;
-        dot.classList.remove('synced', 'offline');
-        dot.classList.add(state === 'synced' ? 'synced' : 'offline');
-        dot.title = detailText || (state === 'synced' ? '已同步至雲端' : '離線中（資料仍安全留在本機快取，恢復連線後會自動同步）');
-    }
-
-    // 保留原本的函式名稱與呼叫方式（reportFirestoreWrite／loadUserDataFromCloud 等既有程式碼
-    // 都是呼叫這兩個函式），但內部行為改成只更新安靜狀態點，不再彈出大型蓋版通知或 alert()
-    function showCloudSyncBanner(text) {
-        setSyncStatus('offline', text);
-    }
-
-    function hideCloudSyncBanner() {
-        setSyncStatus('synced');
-    }
-
-    // 依 Firestore 回傳的錯誤代碼／訊息，組出白話的排查提示；kind 是 'read' 或 'write'。
-    // 注意：啟用 enablePersistence()（IndexedDB 離線持久化）之後，離線時的讀寫大多會直接吃本機
-    // 快取而「成功」（不會真的丟到這個 catch 分支），所以這裡的 isOffline 分支主要是處理「本機
-    // 快取也還沒有任何資料可用」這種極端情況，文字改成安靜、不焦慮的說法，不會叫使用者要做什麼。
-    function buildCloudSyncErrorMessage(contextLabel, e, kind) {
-        const code = (e && e.code) || '';
-        const msg = (e && e.message) || String(e || '未知錯誤');
-        const isPermission = code === 'permission-denied' || /permission/i.test(msg);
-        const isOffline = code === 'unavailable' || /offline|network/i.test(msg);
-        const action = kind === 'write' ? '這次雲端儲存暫時沒有成功，畫面上的資料還在，不會不見' : '這次雲端資料暫時讀取不到，先繼續顯示目前畫面上的資料';
-        let hint;
-        if (isPermission) {
-            hint = '最可能原因：Firebase Console 的 Firestore「安全規則」尚未正確設定（或還停在測試模式、已到期），導致已登入帳號也被拒絕讀寫自己的資料。請到 Firebase Console →「Firestore Database」→「規則」，貼上正確規則後按「發布」。';
-        } else if (isOffline) {
-            hint = '離線模式中（資料來源：Firestore 本機快取）。系統會在背景持續嘗試重新連線，恢復連線後會自動同步，不需要手動重新整理。';
-        } else {
-            hint = '請重新整理頁面再試一次；如果持續發生，請檢查 Firebase 專案設定與 Firestore 安全規則是否正確。';
-        }
-        return `${action}（${contextLabel}）。${hint}（技術細節：${msg}）`;
-    }
-
-    // 統一包裝所有 Firestore 寫入 Promise：失敗時把狀態點轉成灰色（離線／失敗原因收進 title），
-    // 成功時轉回綠色，不會用彈窗或蓋版通知打斷操作
-    function reportFirestoreWrite(promise, contextLabel) {
-        return promise.then(() => {
-            hideCloudSyncBanner();
-        }).catch(e => {
-            console.warn(`雲端儲存失敗（${contextLabel}）`, e);
-            showCloudSyncBanner(buildCloudSyncErrorMessage(contextLabel, e, 'write'));
-        });
-    }
-
     /* ---- Firestore 讀寫：路徑 users/{uid}/portfolio_data/{holdings|settings|memory}，
        每位使用者只能讀寫自己 uid 底下的文件（由上面第 4 點的安全規則保證） ---- */
     function userDocRef(docName) {
@@ -2307,11 +2122,9 @@
         } catch (e) {
             readFailed = true;
             console.warn('雲端資料讀取失敗，這次保留畫面上既有的資料、不會被空白資料覆蓋，請重新整理再試一次', e);
-            showCloudSyncBanner(buildCloudSyncErrorMessage('讀取持股與設定', e, 'read'));
         }
 
         if (readFailed) return; // appData／feeDiscount／API 金鑰／記憶庫全部維持原樣，不去動它
-        hideCloudSyncBanner(); // 這次讀取成功，收掉先前可能顯示的失敗提示（如果有的話）
 
         // 只有在「這次讀取確實成功」的前提下，才逐欄位套用雲端資料；欄位本身沒有回傳值（例如帳號
         // 真的是第一次登入、雲端還沒有任何文件）時，保留畫面上原本的值，不主動塞空陣列/0 進去
@@ -2364,15 +2177,9 @@
         }
     }
 
-    // 注意：這裡改用 { merge: true }（雲端優先同步架構的一部分）——即使是另一台裝置（例如手機 B）
-    // 在這台裝置離線輸入資料的期間，於雲端寫入了其他欄位，這裡的存檔也只會合併更新這幾個欄位本身，
-    // 不會整份文件覆蓋掉。要老實說明一個限制：{merge:true} 是「欄位層級」合併，stocks 這種陣列欄位
-    // 本身還是整包覆蓋（不是逐筆比對合併），所以兩台裝置「同時」新增/修改不同持股時，還是後寫入的
-    // 那一台會覆蓋先寫入的內容（Last-Write-Wins），不是真正逐筆合併——這是 Firestore merge 的已知限制，
-    // 不是這裡的程式漏洞。
     function persistHoldings() {
         if (!currentUser || !fbDb) return;
-        reportFirestoreWrite(userDocRef('holdings').set({
+        userDocRef('holdings').set({
             cash: appData.cash,
             stocks: appData.stocks,
             watchlist: appData.watchlist,
@@ -2381,17 +2188,17 @@
             priceAlerts,
             targetAllocation,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }, { merge: true }), '持股資料');
+        }).catch(e => console.warn('雲端儲存失敗（持股資料），資料先保留在畫面上，可以再按一次動作重試', e));
     }
 
     // 已實現損益流水帳單獨存放在 trade_history 文件，跟 holdings 分開，平倉歸檔／刪除誤填紀錄
-    // 都只會動這份文件，不會影響到目前的持股與現金資料；同樣使用 merge:true
+    // 都只會動這份文件，不會影響到目前的持股與現金資料
     function persistTradeHistory() {
         if (!currentUser || !fbDb) return;
-        reportFirestoreWrite(userDocRef('trade_history').set({
+        userDocRef('trade_history').set({
             trades: tradeHistory,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }, { merge: true }), '已實現損益流水帳');
+        }).catch(e => console.warn('雲端儲存失敗（已實現損益流水帳），資料先保留在畫面上，可以再按一次動作重試', e));
     }
 
     // 注意：這裡改用 { merge: true }，只更新這幾個欄位、不會整份文件覆蓋掉——避免哪天有其他
@@ -2399,19 +2206,19 @@
     // 文件裡時，被這裡的存檔操作不小心整份蓋掉、悄悄遺失同意紀錄
     function persistSettings() {
         if (!currentUser || !fbDb) return;
-        reportFirestoreWrite(userDocRef('settings').set({
+        userDocRef('settings').set({
             openRouterApiKey: openRouterApiKeyCache,
             emailJsConfig,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }, { merge: true }), '個人設定');
+        }, { merge: true }).catch(e => console.warn('雲端儲存失敗（個人設定）', e));
     }
 
     function persistMemory() {
         if (!currentUser || !fbDb) return;
-        reportFirestoreWrite(userDocRef('memory').set({
+        userDocRef('memory').set({
             history: summaryHistoryCache,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }, { merge: true }), '記憶庫');
+        }).catch(e => console.warn('雲端儲存失敗（記憶庫）', e));
     }
 
     /* ========================================================================
@@ -2609,7 +2416,7 @@
     let companyMap = {};        // code -> { name, industryCode, industryName }
     let stockDayAllMap = {};    // code -> { close, change, volume, open, high, low, date }
     let bwibbuMap = {};         // code -> { pe, yield, pb }
-    let t86Map = {};            // code -> { foreignNet, trustNet, dealerNet, instNet, date }
+    let t86Map = {};            // code -> { foreignNet, instNet, date }
     let stockNameCache = {};    // code -> 從證交所日成交資料 title 解析出的中文名稱
     let stockMonthCache = {};   // `${code}_${YYYYMM}` -> { rows: [...], fetchedAt }
     let stockYearCache = {};    // `${code}_${year}` -> { rows: [...], fetchedAt }
@@ -2689,6 +2496,12 @@
     // 同時在「持股」與「觀望清單」中尋找股票資料
     function findAnyStock(symbol) {
         return appData.stocks.find(s => s.symbol === symbol) || appData.watchlist.find(s => s.symbol === symbol);
+    }
+
+    // 只在「實際持有」的持股清單裡找（不含觀望清單）——短線交易引擎的買入均價線／損益標示、
+    // 加碼試算，都只在使用者「真的持有」這檔標的時才適用，觀望中的標的沒有真實成本可以算損益
+    function findHeldStock(symbol) {
+        return appData.stocks.find(s => s.symbol === symbol) || null;
     }
 
     // 試算「今日平倉（賣出全部持股）」需要的手續費與證交稅
@@ -3066,58 +2879,24 @@
     // 依「雙軌制」估算某檔持股的預估股利：官方公告優先（perShareCash > 0 才算數，避免揭露 0
     // 元股利的紀錄被誤判成「有公告」），沒有官方公告資料才退而求其次，用歷史殖利率 × 持有市值估算。
     // 兩軌都沒有資料就回傳 null，呼叫端要自行處理「無法估算」的顯示情況。
-    const DIVIDEND_FREQUENCY_MAP = {
-        '0050': '季配', '006208': '年配', '0056': '季配', '00878': '季配',
-        '00713': '季配', '00929': '月配', '00919': '季配', '00939': '月配',
-        '00940': '月配', '00915': '季配', '00918': '月配', '00934': '季配',
-        '0051': '年配', '0052': '年配'
-    };
-    function getDividendFrequencyLabel(stock) {
-        if (DIVIDEND_FREQUENCY_MAP[stock.symbol]) return DIVIDEND_FREQUENCY_MAP[stock.symbol];
-        if (isETF(stock.symbol)) return '季配';
-        return '年配';
-    }
-
-    const HISTORICAL_DIVIDEND_DB = {
-        '0050': [{ year: 2025, perShare: 3.06 }, { year: 2024, perShare: 4.00 }, { year: 2023, perShare: 4.50 }],
-        '2449': [{ year: 2025, perShare: 4.0 }, { year: 2024, perShare: 3.2 }, { year: 2023, perShare: 3.5 }],
-        '2493': [{ year: 2025, perShare: 4.0 }, { year: 2024, perShare: 5.0 }, { year: 2023, perShare: 4.0 }],
-        '2618': [{ year: 2025, perShare: 2.4 }, { year: 2024, perShare: 1.8 }, { year: 2023, perShare: 0.8 }],
-        '2633': [{ year: 2025, perShare: 1.05 }, { year: 2024, perShare: 1.02 }, { year: 2023, perShare: 0.67 }],
-        '2646': [{ year: 2025, perShare: 0 }, { year: 2024, perShare: 0 }, { year: 2023, perShare: 0 }],
-        '2881': [{ year: 2025, perShare: 4.25 }, { year: 2024, perShare: 2.5 }, { year: 2023, perShare: 1.5 }],
-        '3481': [{ year: 2025, perShare: 1.0 }, { year: 2022, perShare: 1.05 }]
-    };
-    const DIVIDEND_ANNOUNCE_FRESH_DAYS = 200;
-
     function estimateDividendForStock(stock) {
-        const freqLabel = getDividendFrequencyLabel(stock);
         const announce = dividendAnnounceMap[stock.symbol];
         if (announce && announce.perShareCash > 0) {
-            const daysSinceBoard = announce.boardDate ? (Date.now() - announce.boardDate.getTime()) / 86400000 : null;
-            const isFresh = daysSinceBoard !== null && daysSinceBoard <= DIVIDEND_ANNOUNCE_FRESH_DAYS;
-            const periodText = `${announce.yearLabel ? announce.yearLabel + '年度' : ''}${announce.periodLabel || ''}`;
             return {
-                track: isFresh ? 'official' : 'official_prior',
-                freqLabel,
+                track: 'official',
                 perShare: announce.perShareCash,
                 totalAmount: Math.round(announce.perShareCash * stock.shares),
-                meta: isFresh
-                    ? `${periodText || ''}官方公告`
-                    : `當期官方公告尚未發布，改參考上一期（${periodText || '前期'}）實際配息金額`
+                meta: `${announce.yearLabel ? announce.yearLabel + '年度' : ''}${announce.periodLabel || ''}官方公告`
             };
         }
-        const histList = HISTORICAL_DIVIDEND_DB[stock.symbol];
-        if (Array.isArray(histList) && histList.length > 0) {
-            const latest = histList[0];
+        const bw = bwibbuMap[stock.symbol];
+        if (bw && bw.yield) {
+            const marketVal = (stock.price || stock.cost) * stock.shares;
             return {
-                track: 'historical_db',
-                freqLabel,
-                perShare: latest.perShare,
-                totalAmount: Math.round(latest.perShare * stock.shares),
-                meta: latest.perShare > 0
-                    ? `官方公告暫時讀取不到，改採 ${latest.year} 年度實際配息金額 NT$ ${latest.perShare} / 股計算`
-                    : `${latest.year} 年度實際查證結果：該代號尚未配發現金股利`
+                track: 'historical',
+                perShare: null,
+                totalAmount: Math.round(marketVal * (bw.yield / 100)),
+                meta: `依歷史殖利率 ${bw.yield.toFixed(2)}% 估算`
             };
         }
         return null;
@@ -3132,34 +2911,18 @@
                 const idxCode = fields.indexOf('證券代號');
                 let idxForeign = fields.findIndex(f => f.includes('外陸資買賣超股數(不含外資自營商)'));
                 if (idxForeign === -1) idxForeign = fields.findIndex(f => f.includes('外陸資買賣超股數'));
-                let idxTotal = fields.length - 1;
-                let idxTrust = fields.findIndex(f => f.indexOf('投信') !== -1 && f.indexOf('買賣超') !== -1);
-                let idxDealerTotal = fields.findIndex(f => f === '自營商買賣超股數' || (f.indexOf('自營商') !== -1 && f.indexOf('買賣超') !== -1 && f.indexOf('自行') === -1 && f.indexOf('避險') === -1));
-                let idxDealerSelf = fields.findIndex(f => f.indexOf('自營商') !== -1 && f.indexOf('自行') !== -1 && f.indexOf('買賣超') !== -1);
-                let idxDealerHedge = fields.findIndex(f => f.indexOf('自營商') !== -1 && f.indexOf('避險') !== -1 && f.indexOf('買賣超') !== -1);
-                const parseNum = (row, idx) => idx >= 0 ? parseInt(String(row[idx]).replace(/,/g, ''), 10) : null;
+                let idxTotal = fields.length - 1; // 三大法人買賣超股數通常為最後一欄
                 const map = {};
                 data.data.forEach(r => {
                     const code = r[idxCode];
-                    let dealerNet = parseNum(r, idxDealerTotal);
-                    if (dealerNet === null || isNaN(dealerNet)) {
-                        const self = parseNum(r, idxDealerSelf);
-                        const hedge = parseNum(r, idxDealerHedge);
-                        dealerNet = (self !== null && !isNaN(self) && hedge !== null && !isNaN(hedge)) ? (self + hedge) : null;
-                    }
                     map[code] = {
-                        foreignNet: parseNum(r, idxForeign),
-                        trustNet: parseNum(r, idxTrust),
-                        dealerNet,
-                        instNet: parseNum(r, idxTotal),
+                        foreignNet: idxForeign >= 0 ? parseInt(String(r[idxForeign]).replace(/,/g, ''), 10) : null,
+                        instNet: parseInt(String(r[idxTotal]).replace(/,/g, ''), 10),
                         date: west
                     };
                 });
                 t86Map = map;
-                if (currentSymbol) {
-                    renderDayInfo(currentSymbol);
-                    renderDiagnosticPanel(currentSymbol);
-                }
+                if (currentSymbol) renderDayInfo(currentSymbol);
                 return;
             }
         }
@@ -3482,55 +3245,41 @@
     /* ========================================================================
        畫面渲染：總覽卡片
     ======================================================================== */
-    // renderUI 是每次資料變更（新增／刪除／編輯持股、批次匯入、雲端讀取成功）後統一呼叫的總渲染
-    // 入口。這裡刻意把每個獨立的畫面區塊各自包一層 try/catch：任何一小塊（例如圓餅圖繪製）
-    // 意外拋出例外，也只會在 console 留下記錄，不會讓整個 renderUI() 中途停擺，導致後面
-    // 該更新的持股清單、總資產看板反而維持在舊畫面或空白狀態——這正是先前「已匯入 N 筆持股，
-    // 但畫面仍顯示尚無持股」問題的根本防護。
     function renderUI() {
-        if (!appData) return;
-        try {
-            let totalStockCost = 0;
-            let totalStockMarket = 0;
-            let totalFeesTaxes = 0;
+        let totalStockCost = 0;
+        let totalStockMarket = 0;
+        let totalFeesTaxes = 0;
 
-            appData.stocks.forEach(s => {
-                totalStockCost += s.shares * s.cost;
-                totalStockMarket += s.shares * s.price;
-                s.market_val = s.shares * s.price;
-                totalFeesTaxes += calcCloseCost(s).totalCost;
-            });
+        appData.stocks.forEach(s => {
+            totalStockCost += s.shares * s.cost;
+            totalStockMarket += s.shares * s.price;
+            s.market_val = s.shares * s.price;
+            totalFeesTaxes += calcCloseCost(s).totalCost;
+        });
 
-            const totalMarket = appData.cash + totalStockMarket;
-            const totalCost = appData.cash + totalStockCost;
-            // 損益已扣掉「今天全部平倉」估計要付的手續費＋證交稅，更貼近實際能拿回的錢
-            const pnl = (totalMarket - totalCost) - totalFeesTaxes;
-            const pnlRate = totalCost > 0 ? ((pnl / totalCost) * 100).toFixed(1) : 0;
+        const totalMarket = appData.cash + totalStockMarket;
+        const totalCost = appData.cash + totalStockCost;
+        // 損益已扣掉「今天全部平倉」估計要付的手續費＋證交稅，更貼近實際能拿回的錢
+        const pnl = (totalMarket - totalCost) - totalFeesTaxes;
+        const pnlRate = totalCost > 0 ? ((pnl / totalCost) * 100).toFixed(1) : 0;
 
-            document.getElementById('total-market').innerText = fmtNum(totalMarket);
-            document.getElementById('sub-market').innerText = `流動現金 NT$ ${fmtNum(appData.cash)} + 股票現值 NT$ ${fmtNum(totalStockMarket)}`;
+        document.getElementById('total-market').innerText = fmtNum(totalMarket);
+        document.getElementById('sub-market').innerText = `流動現金 NT$ ${fmtNum(appData.cash)} + 股票現值 NT$ ${fmtNum(totalStockMarket)}`;
 
-            document.getElementById('total-cost').innerText = fmtNum(totalCost);
-            document.getElementById('sub-cost').innerText = `流動現金 NT$ ${fmtNum(appData.cash)} + 股票成本 NT$ ${fmtNum(totalStockCost)}`;
+        document.getElementById('total-cost').innerText = fmtNum(totalCost);
+        document.getElementById('sub-cost').innerText = `流動現金 NT$ ${fmtNum(appData.cash)} + 股票成本 NT$ ${fmtNum(totalStockCost)}`;
 
-            document.getElementById('total-pnl').innerText = (pnl >= 0 ? '+' : '') + fmtNum(pnl);
-            document.getElementById('pnl-badge').innerText = (pnl >= 0 ? '+' : '') + pnlRate + '%';
+        document.getElementById('total-pnl').innerText = (pnl >= 0 ? '+' : '') + fmtNum(pnl);
+        document.getElementById('pnl-badge').innerText = (pnl >= 0 ? '+' : '') + pnlRate + '%';
 
-            const cashMgmtEl = document.getElementById('cash-mgmt-current');
-            if (cashMgmtEl) cashMgmtEl.innerText = `NT$ ${fmtNum(appData.cash)}`;
-        } catch (e) {
-            console.error('renderUI：總資產看板渲染失敗', e);
-        }
+        const cashMgmtEl = document.getElementById('cash-mgmt-current');
+        if (cashMgmtEl) cashMgmtEl.innerText = `NT$ ${fmtNum(appData.cash)}`;
 
-        try { renderPie(); } catch (e) { console.error('renderUI：資產圓餅圖渲染失敗', e); }
-        try { renderHoldingsManage(); } catch (e) { console.error('renderUI：持股清單渲染失敗', e); }
-        try { updateDeviationBadge(); } catch (e) { console.error('renderUI：配置偏離警示渲染失敗', e); }
-        try {
-            if (!currentSymbol && appData.stocks.length > 0) {
-                selectStock(appData.stocks[0].symbol);
-            }
-        } catch (e) {
-            console.error('renderUI：預設選股失敗', e);
+        renderPie();
+        renderHoldingsManage();
+        updateDeviationBadge();
+        if (!currentSymbol && appData.stocks.length > 0) {
+            selectStock(appData.stocks[0].symbol);
         }
     }
 
@@ -3548,19 +3297,11 @@
                     <div class="font-bold text-gray-800 cursor-pointer" onclick="selectStock('${s.symbol}')">${s.symbol} ${s.name} ${badge}</div>
                     <div class="text-gray-500">NT$ ${fmtNum(s.price)}　${s.shares.toLocaleString()} 股</div>
                     <div class="${pnl >= 0 ? 'text-red-500' : 'text-green-600'} font-bold" title="已扣賣出手續費與證交稅">${pnl >= 0 ? '+' : ''}${fmtNum(pnl)}</div>
-                    <button type="button" onclick="toggleEditStockRow(${i})" class="text-gray-300 hover:text-gray-700 font-bold px-2 text-[11px]">編輯</button>
                     <button type="button" onclick="removeStock(${i})" class="text-gray-300 hover:text-red-500 font-black px-2">×</button>
                 </div>
                 <div class="text-[11px] text-gray-400 mt-1 pl-0">
                     左側損益已扣費：若今天全部平倉，賣出金額 NT$ ${fmtNum(c.amount)}，手續費 NT$ ${fmtNum(c.fee)}＋${isETF(s.symbol) ? 'ETF' : '股票'}證交稅（${(isETF(s.symbol)?TAX_RATE_ETF:TAX_RATE_STOCK)*100}%）NT$ ${fmtNum(c.tax)}，
                     稅費合計 NT$ ${fmtNum(c.totalCost)}，扣完稅費約可拿回 <span class="font-bold text-gray-600">NT$ ${fmtNum(c.netProceeds)}</span>。
-                </div>
-                <div id="stock-edit-row-${i}" class="hidden mt-2 flex items-center gap-2 bg-gray-50 rounded-xl p-2">
-                    <span class="text-[11px] font-bold text-gray-500 px-1">${s.symbol}</span>
-                    <input id="edit-shares-${i}" type="number" value="${s.shares}" placeholder="股數" class="flex-1 bg-white border border-gray-200 p-2 rounded-lg text-xs text-gray-900 focus:outline-none focus:border-black">
-                    <input id="edit-cost-${i}" type="number" value="${s.cost}" placeholder="成本" class="flex-1 bg-white border border-gray-200 p-2 rounded-lg text-xs text-gray-900 focus:outline-none focus:border-black">
-                    <button type="button" onclick="updateStock(${i})" class="text-xs font-black bg-black text-white px-3 py-2 rounded-lg hover:bg-gray-800 transition whitespace-nowrap">儲存</button>
-                    <button type="button" onclick="toggleEditStockRow(${i})" class="text-xs font-bold text-gray-400 hover:text-gray-700 px-2">取消</button>
                 </div>
             </div>`;
         }).join('') || '<p class="text-gray-400 text-xs py-2">目前尚無持股，請從下方新增。</p>';
@@ -3585,34 +3326,6 @@
         persistHoldings();
         renderUI();
         checkLowCashAlert();
-    }
-
-    // 展開/收合單一持股的行內編輯表單（股數／成本），一次只允許看到自己這一列的表單，
-    // 其他列若還開著就先收起來，介面比較乾淨
-    function toggleEditStockRow(i) {
-        const row = document.getElementById(`stock-edit-row-${i}`);
-        if (!row) return;
-        const isHidden = row.classList.contains('hidden');
-        document.querySelectorAll('[id^="stock-edit-row-"]').forEach(r => r.classList.add('hidden'));
-        if (isHidden) row.classList.remove('hidden');
-    }
-
-    // 只修正股數／成本（例如當初打錯字、或忘記算零股），純粹改資料，不當成買賣交易處理：
-    // 不扣不退現金、不寫進 08 已實現損益流水帳。市值同步用目前股價重新算一次。
-    function updateStock(i) {
-        const stock = appData.stocks[i];
-        if (!stock) return;
-        const shares = parseInt(document.getElementById(`edit-shares-${i}`).value || '0', 10);
-        const cost = parseFloat(document.getElementById(`edit-cost-${i}`).value || '0');
-        if (!shares || shares <= 0 || !cost || cost <= 0) {
-            alert('股數與成本都必須是大於 0 的數字。');
-            return;
-        }
-        stock.shares = shares;
-        stock.cost = cost;
-        stock.market_val = shares * stock.price;
-        persistHoldings();
-        renderUI();
     }
 
     // 平倉自動歸檔：把這筆持股完整的買賣紀錄＋分次領息明細，拆分計算資本損益／股息收入／總報酬，
@@ -3672,33 +3385,25 @@
         if (avgEl) avgEl.innerText = `NT$ ${fmtNum(annualTotal / 12)}`;
 
         listEl.innerHTML = rows.map(({ stock, est }) => {
-            const freqTag = `<span class="text-[10px] font-bold text-gray-400 border border-gray-200 rounded-full px-2 py-0.5 whitespace-nowrap">【${getDividendFrequencyLabel(stock)}】</span>`;
             if (!est) {
                 return `<div class="py-4">
-                    <div class="flex justify-between items-center text-xs gap-2">
+                    <div class="flex justify-between items-center text-xs">
                         <div class="font-bold text-gray-800">${stock.symbol} ${stock.name}</div>
-                        ${freqTag}
-                        <span class="diag-badge">[無資料]</span>
+                        <span class="diag-badge">[無法估算]</span>
                     </div>
-                    <p class="text-[11px] text-gray-400 mt-1">尚無該代號的歷史配息紀錄，請至公開資訊觀測站查詢。</p>
+                    <p class="text-[11px] text-gray-400 mt-1">目前抓不到官方公告，也沒有歷史殖利率資料可供估算。</p>
                 </div>`;
             }
             const badge = est.track === 'official'
                 ? `<span class="diag-badge bear">[已公告]</span>`
-                : est.track === 'official_prior'
-                ? `<span class="diag-badge">[上一期參考]</span>`
-                : `<span class="diag-badge">[歷史實績]</span>`;
-            const actionHtml = est.totalAmount > 0
-                ? `<button type="button" onclick="depositDividend('${stock.symbol}')" class="bg-black text-white font-bold text-[11px] px-3 py-2 rounded-lg hover:bg-gray-800 transition whitespace-nowrap">[ 一鍵股利入帳 ]</button>`
-                : '';
+                : `<span class="diag-badge">[歷史推估]</span>`;
             return `<div class="py-4">
                 <div class="flex justify-between items-center text-xs gap-3">
                     <div class="font-bold text-gray-800">${stock.symbol} ${stock.name}</div>
-                    ${freqTag}
                     ${badge}
                     <div class="text-gray-500 flex-1 text-right">${escapeHtml(est.meta)}</div>
                     <div class="font-bold text-gray-900" style="font-family:'IBM Plex Mono',monospace;">NT$ ${fmtNum(est.totalAmount)}</div>
-                    ${actionHtml}
+                    <button type="button" onclick="depositDividend('${stock.symbol}')" class="bg-black text-white font-bold text-[11px] px-3 py-2 rounded-lg hover:bg-gray-800 transition whitespace-nowrap">[ 一鍵股利入帳 ]</button>
                 </div>
             </div>`;
         }).join('') || '<p class="text-gray-400 text-xs py-2">目前尚無持股，無預估股利資料。</p>';
@@ -4558,17 +4263,20 @@
     // Chart.js 自訂繪圖 plugin：在圖表上疊畫亮藍色垂直虛線，標示未來持有區間內的重大事件日期。
     // 事件的 X 座標用「今天→出場日」兩個既有資料點之間的像素位置線性內插（frac 0~1），
     // 不依賴額外的 annotation 外掛套件，純手繪 Canvas 2D，畫完立刻 restore 避免污染其他圖層。
+    // 注意：「今天→出場」現在已經展開成跟持有天數等長的類別軸格子（每天一格，見 buildProjectionChart
+    // 的等距時間軸調整），所以這裡改讀 chart.__totalDays（持有天數）取代原本寫死的 +1。
     const shortTermEventLinePlugin = {
         id: 'shortTermEventLines',
         afterDraw(chart) {
             const lines = chart.__eventLines;
             const histLen = chart.__histLen;
-            if (!lines || !lines.length || histLen === undefined) return;
+            const totalDays = chart.__totalDays;
+            if (!lines || !lines.length || histLen === undefined || !totalDays) return;
             const { ctx, chartArea, scales } = chart;
             const xScale = scales.x;
             if (!xScale || !chartArea) return;
             const todayX = xScale.getPixelForValue(histLen);
-            const targetX = xScale.getPixelForValue(histLen + 1);
+            const targetX = xScale.getPixelForValue(histLen + totalDays);
             ctx.save();
             lines.forEach(line => {
                 const x = todayX + (targetX - todayX) * line.frac;
@@ -4775,10 +4483,77 @@
         }
     };
 
+    // 買入平均成本水平線：只有「目前這個短線標的剛好也是實際持股」時才會有值（見 buildProjectionChart
+    // 裡的 findHeldStock 判斷）。用實線＋標籤顯示均價與目前損益，跟目標/停損的虛線視覺區分開來，
+    // 顏色也刻意跟橘色的目標線、灰褐色的停損線都不同，避免三條線混在一起分不清楚。
+    const avgCostLinePlugin = {
+        id: 'avgCostLine',
+        afterDraw(chart) {
+            const info = chart.__avgCostLine;
+            if (!info || !info.avgCost) return;
+            const { ctx, chartArea, scales } = chart;
+            const yScale = scales.y;
+            if (!yScale || !chartArea) return;
+            const y = yScale.getPixelForValue(info.avgCost);
+            if (y < chartArea.top || y > chartArea.bottom) return;
+            ctx.save();
+            ctx.beginPath();
+            ctx.strokeStyle = '#4A6B7C';
+            ctx.lineWidth = 2;
+            ctx.moveTo(chartArea.left, y);
+            ctx.lineTo(chartArea.right, y);
+            ctx.stroke();
+
+            const label = `持有均價 NT$ ${fmtNum(info.avgCost)}`;
+            ctx.font = 'bold 10px "IBM Plex Mono", monospace';
+            const paddingX = 6, boxHeight = 16;
+            const textWidth = ctx.measureText(label).width;
+            const boxWidth = textWidth + paddingX * 2;
+            let boxX = chartArea.left;
+            let boxY = y - boxHeight - 4;
+            if (boxY < chartArea.top) boxY = y + 4;
+            ctx.fillStyle = 'rgba(74, 107, 124, 0.92)';
+            ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+            ctx.fillStyle = '#FFFFFF';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(label, boxX + boxWidth / 2, boxY + boxHeight / 2);
+            ctx.restore();
+        }
+    };
+
+    // 滾輪縮放／拖曳平移共用設定：「01 資產總覽」K 線圖與這裡的投影連線圖都套用同一份，
+    // 滾輪＝縮放、按住拖曳＝左右平移，並限制不能縮小超過完整資料範圍（避免縮到看不到東西）。
+    // 每次都回傳全新物件（不共用同一個參照），避免兩個圖表實例互相污染彼此的縮放狀態。
+    function buildChartZoomConfig() {
+        return {
+            pan: { enabled: true, mode: 'x' },
+            zoom: {
+                wheel: { enabled: true },
+                pinch: { enabled: true },
+                mode: 'x'
+            },
+            limits: { x: { minRange: 5 } }
+        };
+    }
+
+    // 雙擊圖表重設縮放／平移回預設狀態，這是 chartjs-plugin-zoom 的慣例操作方式，
+    // 縮放/拖曳久了容易迷失在圖表裡，雙擊一次就能立刻回到最初的完整視圖
+    function attachDoubleClickResetZoom(chart, canvas) {
+        if (!chart || !canvas) return;
+        canvas.ondblclick = () => { if (chart.resetZoom) chart.resetZoom(); };
+    }
+
     // 投影連線圖升級：依「歷史顯示區間」選單載入真實／擬真歷史收盤走勢接續到今天這個現價點，
     // 疊上 5MA／20MA／60MA 三條均線（柔化降飽和，當背景參考用，絕不搶主線風采），再從今天點
     // 分別向上畫加粗毒橘色實線到目標價、向下畫灰褐色虛線到停損價，並加一條目標價水平虛線貫穿全圖；
     // 如果持有區間內剛好涵蓋財報等重大事件，會疊畫一條亮藍色垂直虛線並標註日期，提醒留意跳空風險。
+    //
+    // 等距時間軸：「今天→出場」不再只佔 1 個類別軸格子，而是依實際持有天數（plan.holdingDays）
+    // 展開成每天一格，跟前面的歷史收盤線用一樣的「一天一格」間距，才不會出現「明明選了一個月，
+    // 投影區間卻擠成比前面幾天還短」的視覺變形——中間的每一天目標/停損/均線資料留 null、搭配
+    // spanGaps:true，Chart.js 會直接從「今天」那一格連一條直線到「出場」那一格，不會假造中間
+    // 每一天實際會經過的價格（那些是真的預測不出來的），純粹只是讓格子間距對齊。
     async function buildProjectionChart(plan) {
         const canvas = document.getElementById('st-projection-chart');
         if (!canvas || typeof Chart === 'undefined') return;
@@ -4799,27 +4574,38 @@
         });
         const histCloses = historyRows.map(r => parseFloat(String(r[6]).replace(/,/g, '')));
         const histLen = histLabels.length;
+        const totalDays = Math.max(1, plan.holdingDays);
 
         const fmtDate = d => `${d.getMonth() + 1}/${d.getDate()}`;
-        const labels = [...histLabels, `今天 ${fmtDate(plan.today)}`, `出場 ${fmtDate(plan.targetDate)}`];
+        // 「今天」到「出場」之間，每天配一個類別軸格子（跟歷史區間的一天一格完全對齊），
+        // 只有第一格（今天）跟最後一格（出場）有標籤特別標註，中間的日期只顯示日期本身
+        const projectionLabels = [];
+        for (let d = 0; d <= totalDays; d++) {
+            const dt = new Date(plan.today); dt.setDate(dt.getDate() + d);
+            if (d === 0) projectionLabels.push(`今天 ${fmtDate(dt)}`);
+            else if (d === totalDays) projectionLabels.push(`出場 ${fmtDate(dt)}`);
+            else projectionLabels.push(fmtDate(dt));
+        }
+        const labels = [...histLabels, ...projectionLabels];
 
-        // 歷史收盤線只在歷史區間內有值，今天之後兩個點留 null，Chart.js 才不會把歷史線硬拉到
-        // 目標/停損價；目標/停損線則是前面歷史區間留 null，只在「今天→出場」這段畫連線，
-        // 三條線會在「今天」這個交界點自然銜接，視覺上是一條連續不斷的走勢＋投影
-        const historyData = [...histCloses, plan.currentPrice, null];
-        const targetData = new Array(histLen).fill(null).concat([plan.currentPrice, plan.targetPrice]);
-        const stopData = new Array(histLen).fill(null).concat([plan.currentPrice, plan.stopPrice]);
+        // 歷史收盤線只在歷史區間內有值，今天之後留 null，Chart.js 才不會把歷史線硬拉到
+        // 目標/停損價；目標/停損線則是前面歷史區間跟中間天數留 null，只在「今天」與「出場」
+        // 這兩個交界點各畫一個資料點，搭配 spanGaps:true 直接連成一條跨越整個持有天數的直線
+        const historyData = [...histCloses, plan.currentPrice, ...new Array(totalDays).fill(null)];
+        const targetData = new Array(histLen).fill(null).concat([plan.currentPrice], new Array(totalDays - 1).fill(null), [plan.targetPrice]);
+        const stopData = new Array(histLen).fill(null).concat([plan.currentPrice], new Array(totalDays - 1).fill(null), [plan.stopPrice]);
 
         // 均線把「今天的現價」也併進收盤序列一起算（跟歷史收盤線一樣，在今天這個點銜接），
         // 這樣 5/20/60MA 會順順地畫到「今天」這個交界點，剛好接上後面的雙向期望投影連線；
-        // 均線本身無法預測未來，所以「出場」那一格固定留 null，不會硬畫進投影區間裡
+        // 均線本身無法預測未來，所以「今天」之後全部留 null，不會硬畫進投影區間裡
         const closesWithToday = [...histCloses, plan.currentPrice];
         const ma5Full = calcMovingAverage(closesWithToday, 5);
         const ma20Full = calcMovingAverage(closesWithToday, 20);
         const ma60Full = calcMovingAverage(closesWithToday, 60);
-        const ma5Data = [...ma5Full, null];
-        const ma20Data = [...ma20Full, null];
-        const ma60Data = [...ma60Full, null];
+        const maPad = new Array(totalDays).fill(null);
+        const ma5Data = [...ma5Full, ...maPad];
+        const ma20Data = [...ma20Full, ...maPad];
+        const ma60Data = [...ma60Full, ...maPad];
 
         // 未來重大事件（若落在「今天～出場日」區間內）換算成「今天→出場」這段的內插比例 frac（0~1），
         // 交給 shortTermEventLinePlugin 在 afterDraw 階段畫垂直藍線
@@ -4829,6 +4615,12 @@
             frac: totalMs > 0 ? Math.min(1, Math.max(0, (ev.date - plan.today) / totalMs)) : 0,
             label: ev.label
         }));
+
+        // 買入平均成本線：只有「這個短線標的剛好也是實際持股」才會有值，觀望中或純試算的
+        // 標的沒有真實成本，不畫這條線（跟主 K 線圖的保本成本價邏輯一致，只是這裡用的是
+        // 真實買入均價，不是損益兩平價）
+        const heldStock = findHeldStock(plan.symbol);
+        const avgCost = (heldStock && heldStock.cost > 0) ? heldStock.cost : null;
 
         stProjectionChart = new Chart(ctx, {
             type: 'line',
@@ -4866,30 +4658,61 @@
                         label: `[目標 NT$ ${fmtNum(plan.targetPrice)} (${fmtSigned(((plan.targetPrice/plan.currentPrice)-1)*100)}%)]`,
                         data: targetData,
                         borderColor: '#FF6037', backgroundColor: '#FF6037',
-                        borderWidth: 2.5, pointRadius: (c) => (c.dataIndex >= histLen ? 4 : 0), tension: 0, spanGaps: false
+                        borderWidth: 2.5, pointRadius: (c) => (c.raw !== null && c.raw !== undefined ? 4 : 0), tension: 0, spanGaps: true
                     },
                     {
                         label: `[停損 NT$ ${fmtNum(plan.stopPrice)} (${fmtSigned(((plan.stopPrice/plan.currentPrice)-1)*100)}%)]`,
                         data: stopData,
                         borderColor: '#C49A9A', backgroundColor: '#C49A9A',
-                        borderWidth: 2, borderDash: [6, 4], pointRadius: (c) => (c.dataIndex >= histLen ? 4 : 0), tension: 0, spanGaps: false
+                        borderWidth: 2, borderDash: [6, 4], pointRadius: (c) => (c.raw !== null && c.raw !== undefined ? 4 : 0), tension: 0, spanGaps: true
                     }
                 ]
             },
             options: {
                 responsive: true, maintainAspectRatio: false,
-                plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } } },
+                plugins: {
+                    legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } },
+                    zoom: buildChartZoomConfig()
+                },
                 scales: {
                     y: { ticks: { font: { size: 10 } } },
-                    x: { ticks: { font: { size: 9 }, maxTicksLimit: 12, autoSkip: true } }
+                    x: { type: 'category', ticks: { font: { size: 9 }, maxTicksLimit: 12, autoSkip: true } }
                 }
             },
-            plugins: [shortTermEventLinePlugin, targetHorizontalLinePlugin]
+            plugins: [shortTermEventLinePlugin, targetHorizontalLinePlugin, avgCostLinePlugin]
         });
-        // 掛在 chart 實例上，讓自訂 plugin 在 afterDraw 階段讀取事件線／歷史區間長度／目標價水平線
+        // 掛在 chart 實例上，讓自訂 plugin 在 afterDraw 階段讀取事件線／歷史區間長度／持有天數／
+        // 目標價水平線／買入均價線
         stProjectionChart.__eventLines = eventLines;
         stProjectionChart.__histLen = histLen;
+        stProjectionChart.__totalDays = totalDays;
         stProjectionChart.__targetPriceLine = plan.targetPrice;
+        stProjectionChart.__avgCostLine = avgCost ? { avgCost } : null;
+        attachDoubleClickResetZoom(stProjectionChart, canvas);
+
+        renderHoldingPnlNote(plan, heldStock);
+    }
+
+    // 圖表旁的持有損益文字說明：只有「這個短線標的剛好也是實際持股」時才顯示，
+    // 用 DOM 文字（不是畫在 canvas 裡）確保數字清楚好讀、也方便之後要調整樣式或做無障礙閱讀
+    function renderHoldingPnlNote(plan, heldStock) {
+        const el = document.getElementById('st-holding-pnl-note');
+        if (!el) return;
+        if (!heldStock || !heldStock.cost || heldStock.cost <= 0) {
+            el.classList.add('hidden');
+            el.innerHTML = '';
+            return;
+        }
+        const avgCost = heldStock.cost;
+        const shares = heldStock.shares;
+        const pnlAmount = (plan.currentPrice - avgCost) * shares;
+        const pnlPct = ((plan.currentPrice / avgCost) - 1) * 100;
+        const tone = pnlAmount >= 0 ? 'color:#C0392B;' : 'color:#2E7D5B;'; // 台股慣例：紅漲(賺)、綠跌(賠)
+        el.classList.remove('hidden');
+        el.innerHTML = `這檔標的目前實際持有 ${fmtNum(shares)} 股，買入均價 NT$ ${fmtNum(avgCost)}，
+            以現價 NT$ ${fmtNum(plan.currentPrice)} 計算，目前未實現損益：
+            <span style="${tone} font-weight:900;">${fmtSigned(pnlAmount)} 元（${fmtSigned(pnlPct)}%）</span>
+            （尚未計入賣出時的手續費與證交稅）。`;
     }
 
     function renderShortTermAiNotes(plan) {
@@ -4961,6 +4784,123 @@
         } else {
             fallbackCopyText(text);
         }
+    }
+
+    /* ========================================================================
+       加碼試算 (DCA / Pyramiding Calculator)
+       輸入「預計加碼的價格與股數」，即時算出：
+       1) 加碼後的新平均成本價（用於降低持有成本）
+       2) 加碼前後在「現價」的未實現損益變化，以及（如果已經跑過短線試算）在「目標價」的預期損益，
+          幫助判斷追價加碼是否划算——純粹是算術試算，不是任何買賣建議。
+       加碼前的基準：優先用這檔標的「實際持股」的均價與股數；如果目前沒有實際持股（純試算情境），
+       改用短線試算欄位裡輸入的「持有股數／買入單價」當作假設基準，兩種情境都能用。
+    ======================================================================== */
+    function calcPyramidAverage() {
+        const resultEl = document.getElementById('pyr-result');
+        if (!resultEl) return;
+
+        const symbolRaw = document.getElementById('st-symbol').value.trim();
+        if (!symbolRaw) {
+            resultEl.classList.remove('hidden');
+            resultEl.innerHTML = `<p class="text-xs font-bold text-red-500">請先在上方填寫股票標的並執行一次短線試算，加碼試算才有基準價格可以比較。</p>`;
+            return;
+        }
+
+        const addShares = parseFloat(document.getElementById('pyr-add-shares').value);
+        const addPrice = parseFloat(document.getElementById('pyr-add-price').value);
+        if (isNaN(addShares) || addShares <= 0 || isNaN(addPrice) || addPrice <= 0) {
+            resultEl.classList.remove('hidden');
+            resultEl.innerHTML = `<p class="text-xs font-bold text-red-500">請輸入有效的加碼股數與加碼價格（都要大於 0）。</p>`;
+            return;
+        }
+
+        // 加碼前基準：實際持股優先，沒有實際持股的話改用短線試算欄位當假設基準
+        const heldStock = findHeldStock(symbolRaw);
+        let baseShares, baseCost, baseLabel;
+        if (heldStock && heldStock.cost > 0) {
+            baseShares = heldStock.shares;
+            baseCost = heldStock.cost;
+            baseLabel = '目前實際持股';
+        } else if (shortTermPlan && shortTermPlan.symbol === symbolRaw) {
+            baseShares = shortTermPlan.shares;
+            baseCost = shortTermPlan.buyPrice;
+            baseLabel = '短線試算假設持股（非實際持股，僅供試算）';
+        } else {
+            resultEl.classList.remove('hidden');
+            resultEl.innerHTML = `<p class="text-xs font-bold text-red-500">目前沒有 ${symbolRaw} 的實際持股資料，也還沒執行過這檔標的的短線試算，請先按上方「執行短線目標計算與分析」，加碼試算才有基準可以比較。</p>`;
+            return;
+        }
+
+        const currentPrice = (shortTermPlan && shortTermPlan.symbol === symbolRaw) ? shortTermPlan.currentPrice : resolveLatestPrice(symbolRaw);
+
+        const newShares = baseShares + addShares;
+        const newTotalCost = baseShares * baseCost + addShares * addPrice;
+        const newAvgCost = newTotalCost / newShares;
+        const avgCostChangePct = ((newAvgCost / baseCost) - 1) * 100;
+
+        let pnlHtml = '';
+        if (currentPrice) {
+            const pnlBefore = (currentPrice - baseCost) * baseShares;
+            const pnlAfter = (currentPrice - newAvgCost) * newShares;
+            const toneBefore = pnlBefore >= 0 ? 'color:#C0392B;' : 'color:#2E7D5B;';
+            const toneAfter = pnlAfter >= 0 ? 'color:#C0392B;' : 'color:#2E7D5B;';
+            pnlHtml += `
+                <div class="diag-stat-grid" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
+                    <div class="diag-stat-card">
+                        <p class="diag-stat-label">加碼前未實現損益（現價 NT$ ${fmtNum(currentPrice)}）</p>
+                        <p class="diag-stat-value" style="${toneBefore}">${fmtSigned(pnlBefore)} 元</p>
+                    </div>
+                    <div class="diag-stat-card">
+                        <p class="diag-stat-label">加碼後未實現損益（現價 NT$ ${fmtNum(currentPrice)}）</p>
+                        <p class="diag-stat-value" style="${toneAfter}">${fmtSigned(pnlAfter)} 元</p>
+                    </div>
+                </div>`;
+        }
+
+        let targetHtml = '';
+        if (shortTermPlan && shortTermPlan.symbol === symbolRaw && currentPrice) {
+            const p = shortTermPlan;
+            const pnlAtTargetBefore = (p.targetPrice - baseCost) * baseShares;
+            const pnlAtTargetAfter = (p.targetPrice - newAvgCost) * newShares;
+            const pnlAtStopBefore = (p.stopPrice - baseCost) * baseShares;
+            const pnlAtStopAfter = (p.stopPrice - newAvgCost) * newShares;
+            targetHtml = `
+                <p class="text-[11px] text-gray-400 mt-1">套用目前這次短線試算算出的目標價／停損價，看看加碼後如果真的走到那個價位，損益會變成怎樣：</p>
+                <div class="diag-stat-grid" style="grid-template-columns: repeat(2, minmax(0, 1fr));">
+                    <div class="diag-stat-card">
+                        <p class="diag-stat-label">走到目標價 NT$ ${fmtNum(p.targetPrice)}</p>
+                        <p class="diag-stat-value" style="color:#C0392B;">${fmtSigned(pnlAtTargetAfter)} 元</p>
+                        <p class="diag-stat-verdict">加碼前原本會是 ${fmtSigned(pnlAtTargetBefore)} 元</p>
+                    </div>
+                    <div class="diag-stat-card">
+                        <p class="diag-stat-label">走到停損價 NT$ ${fmtNum(p.stopPrice)}</p>
+                        <p class="diag-stat-value" style="color:#2E7D5B;">${fmtSigned(pnlAtStopAfter)} 元</p>
+                        <p class="diag-stat-verdict">加碼前原本會是 ${fmtSigned(pnlAtStopBefore)} 元</p>
+                    </div>
+                </div>`;
+        }
+
+        resultEl.classList.remove('hidden');
+        resultEl.innerHTML = `
+            <p class="text-[11px] text-gray-400">加碼前基準：${baseLabel}，${fmtNum(baseShares)} 股 × NT$ ${fmtNum(baseCost)}。</p>
+            <div class="diag-stat-grid" style="grid-template-columns: repeat(3, minmax(0, 1fr));">
+                <div class="diag-stat-card">
+                    <p class="diag-stat-label">加碼後新平均成本價</p>
+                    <p class="diag-stat-value">NT$ ${fmtNum(newAvgCost)}</p>
+                    <p class="diag-stat-verdict">${avgCostChangePct >= 0 ? '均價墊高' : '均價降低'} ${fmtSigned(avgCostChangePct)}%</p>
+                </div>
+                <div class="diag-stat-card">
+                    <p class="diag-stat-label">加碼後總股數</p>
+                    <p class="diag-stat-value">${fmtNum(newShares)} 股</p>
+                </div>
+                <div class="diag-stat-card">
+                    <p class="diag-stat-label">加碼後總成本</p>
+                    <p class="diag-stat-value">NT$ ${fmtNum(newTotalCost)}</p>
+                </div>
+            </div>
+            ${pnlHtml}
+            ${targetHtml}
+            <p class="diag-note">以上純粹是算術試算（未計入這筆加碼本身要付的手續費），不是加碼與否的建議，實際進場請自行評估風險。</p>`;
     }
 
     // 主入口：依「有沒有填標的」自動分派模式 A（已選標的：直接算）／模式 B（只填預算：AI 選股）
@@ -6592,14 +6532,11 @@
                         price: breakeven,
                         label: breakeven ? `保本成本價 NT$ ${fmtNum(breakeven)}` : ''
                     },
-                    zoom: {
-                        pan: { enabled: true, mode: 'x', modifierKey: null },
-                        zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' },
-                        limits: { x: { min: 'original', max: 'original' } }
-                    }
+                    zoom: buildChartZoomConfig()
                 },
                 scales: {
                     x: {
+                        type: 'category',
                         grid: { display: false },
                         ticks: { color: '#733635', font: { family: "'IBM Plex Mono', monospace", size: 10 } }
                     },
@@ -6613,6 +6550,7 @@
             },
             plugins: [closedMarkerPlugin, breakevenLinePlugin]
         });
+        attachDoubleClickResetZoom(klineChartRegistry[canvasId], canvasEl);
     }
 
     /* ========================================================================
@@ -6809,12 +6747,13 @@
             } catch (e) {}
         }
         const data = await fetchJSONSafe(`${TWSE_OPEN}/opendata/t187ap05_L`, 25000);
-        if (!Array.isArray(data)) return null; // 抓取失敗不快取，讓下次呼叫能真正重新嘗試
         const map = {};
-        data.forEach(row => {
-            const code = row['公司代號'];
-            if (code) map[code] = row;
-        });
+        if (Array.isArray(data)) {
+            data.forEach(row => {
+                const code = row['公司代號'];
+                if (code) map[code] = row;
+            });
+        }
         monthlyRevenueMap = map;
         localStorage.setItem('tw_monthly_revenue_cache', JSON.stringify({ ts: Date.now(), data: map }));
         return map;
@@ -6830,12 +6769,13 @@
             } catch (e) {}
         }
         const data = await fetchJSONSafe(`${TWSE_OPEN}/opendata/t187ap06_L_ci`, 25000);
-        if (!Array.isArray(data)) return null;
         const map = {};
-        data.forEach(row => {
-            const code = row['公司代號'];
-            if (code) map[code] = row;
-        });
+        if (Array.isArray(data)) {
+            data.forEach(row => {
+                const code = row['公司代號'];
+                if (code) map[code] = row;
+            });
+        }
         quarterlyIncomeMap = map;
         localStorage.setItem('tw_quarterly_income_cache', JSON.stringify({ ts: Date.now(), data: map }));
         return map;
@@ -6851,12 +6791,13 @@
             } catch (e) {}
         }
         const data = await fetchJSONSafe(`${TWSE_OPEN}/opendata/t187ap07_L_ci`, 25000);
-        if (!Array.isArray(data)) return null;
         const map = {};
-        data.forEach(row => {
-            const code = row['公司代號'];
-            if (code) map[code] = row;
-        });
+        if (Array.isArray(data)) {
+            data.forEach(row => {
+                const code = row['公司代號'];
+                if (code) map[code] = row;
+            });
+        }
         balanceSheetMap = map;
         localStorage.setItem('tw_balance_sheet_cache', JSON.stringify({ ts: Date.now(), data: map }));
         return map;
@@ -6967,151 +6908,27 @@
         const incRevenue = pickNumber(incomeRow, ['營業收入']);
         const grossProfit = pickNumber(incomeRow, ['營業毛利（毛損）', '營業毛利(毛損)']);
         const operatingIncome = pickNumber(incomeRow, ['營業利益（損失）', '營業利益(損失)']);
-        const netIncome = pickNumber(incomeRow, ['本期淨利（淨損）', '本期淨利(淨損)', '淨利（淨損）', '本期淨利（淨損）歸屬於母公司業主']);
         const eps = pickNumber(incomeRow, ['基本每股盈餘（元）', '基本每股盈餘(元)']);
 
         const totalAssets = pickNumber(balanceRow, ['資產總額', '資產總計']);
         const totalLiabilities = pickNumber(balanceRow, ['負債總額', '負債總計']);
-        const currentAssets = pickNumber(balanceRow, ['流動資產合計', '流動資產']);
-        const currentLiabilities = pickNumber(balanceRow, ['流動負債合計', '流動負債']);
 
         const grossMarginPct = (incRevenue && grossProfit !== null) ? (grossProfit / incRevenue) * 100 : null;
         const operatingMarginPct = (incRevenue && operatingIncome !== null) ? (operatingIncome / incRevenue) * 100 : null;
         const debtRatioPct = (totalAssets && totalLiabilities !== null) ? (totalLiabilities / totalAssets) * 100 : null;
-        const currentRatioPct = (currentLiabilities && currentAssets !== null) ? (currentAssets / currentLiabilities) * 100 : null;
-
-        // 三張表都有回應，但這個代號完全查不到任何欄位（常見於金融、保險、控股等使用特殊報表格式的產業）
-        // 這種情況要老實顯示「查無資料」，不能拿其他產業的數字來湊
-        if (curRevenue === null && incRevenue === null && grossProfit === null && operatingIncome === null &&
-            netIncome === null && eps === null && totalAssets === null && totalLiabilities === null) {
-            return { available: false };
-        }
 
         return {
-            available: true, fetchFailed: false,
+            available: true,
             revenueMonth,
             curRevenue, lastMonthRevenue, lastYearRevenue, yoyPct,
-            curQuarterRevenue: incRevenue, grossProfit, operatingIncome, netIncome,
-            eps, grossMarginPct, operatingMarginPct, debtRatioPct, currentRatioPct
+            eps, grossMarginPct, operatingMarginPct, debtRatioPct
         };
     }
 
-    // 把公開資訊觀測站的「新台幣仟元」數字，換算成看得懂的億元／萬元
-    function fmtFinAmount(thousandsValue) {
-        if (thousandsValue === null || thousandsValue === undefined || isNaN(thousandsValue)) return '-';
-        const ntd = thousandsValue * 1000;
-        const abs = Math.abs(ntd);
-        if (abs >= 100000000) return `${(ntd / 100000000).toFixed(2)} 億元`;
-        if (abs >= 10000) return `${(ntd / 10000).toFixed(0)} 萬元`;
-        return `${fmtNum(ntd)} 元`;
-    }
-
-    // 從日成交資料列取出「最新一個交易日」的成交股數，供籌碼結構圖估算散戶／其他佔比使用
-    function getLatestVolumeFromRows(rows) {
-        if (!rows || !rows.length) return null;
-        const last = rows[rows.length - 1];
-        const vol = parseFloat(String(last[1]).replace(/,/g, ''));
-        return isNaN(vol) ? null : vol;
-    }
-
-    // 財報 API 暫時抓不到資料時，安排有限次數（避免無限重試）的自動重試
-    const financialDiagnosticRetryCount = {};
-    const FINANCIAL_DIAGNOSTIC_MAX_RETRY = 3;
-
-    // 用當日三大法人（外資／投信／自營商）買賣超股數，估算「當日籌碼結構比重」；
-    // 這是「當天資金流向」的相對強弱，不是法人實際持股比例（持股比例需要證交所每週股權分散表，
-    // 目前沒有可即時串接的公開來源，所以一律誠實標註資料定義，不假裝是持股比例）
-    function computeInstitutionalStructure(symbol, todayVolume) {
-        const rec = t86Map[symbol];
-        if (!rec) return { available: false };
-        const { foreignNet, trustNet, dealerNet } = rec;
-        if (foreignNet === null && trustNet === null && dealerNet === null) return { available: false };
-        const absForeign = Math.abs(foreignNet || 0);
-        const absTrust = Math.abs(trustNet || 0);
-        const absDealer = Math.abs(dealerNet || 0);
-        const instTotal = absForeign + absTrust + absDealer;
-        // 用當日成交量扣掉三大法人買賣超合計，估算散戶及其他的部分；
-        // 若當日成交量抓不到或小於法人合計，退而求其次用一個保守比例代表散戶及其他，避免圖表因分母是 0 而整個消失
-        const retail = (todayVolume && todayVolume > instTotal) ? (todayVolume - instTotal) : Math.max(instTotal * 0.15, 0);
-        const total = instTotal + retail;
-        if (total <= 0) return { available: false };
-        return {
-            available: true, date: rec.date,
-            foreign: absForeign, trust: absTrust, dealer: absDealer, retail,
-            foreignPct: absForeign / total * 100, trustPct: absTrust / total * 100,
-            dealerPct: absDealer / total * 100, retailPct: retail / total * 100
-        };
-    }
-
-    function renderInstitutionalModule(uid, structure) {
-        if (!structure || !structure.available) {
-            return `<div class="card-white p-8 rounded-3xl">
-                <p class="diag-module-title">CHIPS // 籌碼結構</p>
-                <div class="diag-etf-banner">籌碼數據暫時不可用，將於盤後更新。</div>
-            </div>`;
-        }
-        return `<div class="card-white p-8 rounded-3xl space-y-3">
-            <p class="diag-module-title">CHIPS // 當日籌碼結構比重</p>
-            <p class="text-[11px] text-gray-400">資料日期：${structure.date || '-'}。這裡呈現的是「當日三大法人買賣超股數」占比，代表當天資金流向的相對強弱，不是法人實際持股比例（真正的持股比例需要證交所每週股權分散表，目前公開即時資料無法取得）。</p>
-            <div class="w-full h-56 flex items-center justify-center"><canvas id="instHolderPieChart-${uid}"></canvas></div>
-        </div>`;
-    }
-
-    function renderInstitutionalChart(uid, structure) {
-        const chartKey = `instHolderPieChart-${uid}`;
-        if (diagnosticCharts[chartKey]) { diagnosticCharts[chartKey].destroy(); delete diagnosticCharts[chartKey]; }
-        const canvas = document.getElementById(chartKey);
-        if (!canvas || !structure || !structure.available) return;
-        diagnosticCharts[chartKey] = new Chart(canvas.getContext('2d'), {
-            type: 'pie',
-            data: {
-                labels: ['外資', '投信', '自營商', '散戶及其他'],
-                datasets: [{
-                    data: [structure.foreign, structure.trust, structure.dealer, structure.retail],
-                    backgroundColor: ['#E86A4B', '#C49A82', '#8AAEB0', '#D8CFC0'],
-                    borderWidth: 1, borderColor: '#fff'
-                }]
-            },
-            options: {
-                responsive: true, maintainAspectRatio: false,
-                plugins: {
-                    title: { display: true, text: '當日籌碼結構比重', font: { family: "'IBM Plex Mono', monospace", size: 12 }, color: '#733635' },
-                    legend: { position: 'bottom', labels: { font: { size: 10 }, color: '#733635' } },
-                    tooltip: {
-                        callbacks: {
-                            label: (ctx) => {
-                                const pct = [structure.foreignPct, structure.trustPct, structure.dealerPct, structure.retailPct][ctx.dataIndex];
-                                return `${ctx.label}：${pct.toFixed(1)}%`;
-                            }
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    // ETF 沒有傳統財報，改用近期市價漲跌幅來呈現「追蹤表現」，直接複用技術面已經抓好的收盤價，不用再多打一次 API
-    function computeEtfPricePerformance(tech) {
-        if (!tech || !tech.closes || tech.closes.length < 2) return { available: false };
-        const closes = tech.closes;
-        const latest = closes[closes.length - 1];
-        const calcChange = (daysAgo) => {
-            const idx = closes.length - 1 - daysAgo;
-            if (idx < 0) return null;
-            const base = closes[idx];
-            if (!base) return null;
-            return (latest - base) / base * 100;
-        };
-        return {
-            available: true, latest,
-            chg5d: calcChange(5), chg20d: calcChange(20), chg60d: calcChange(60)
-        };
-    }
-
-    // ---- 診斷面板渲染：4 大模組（財務 / 籌碼 / 技術面 / 白話結論），可同時掛在多個容器（資產總覽 + 持股管理與記憶庫）----
+    // ---- 診斷面板渲染：4 大模組（財務 / 技術面 / 白話結論），可同時掛在多個容器（資產總覽 + 持股管理與記憶庫）----
     function diagnosticLoadingHtml(stock) {
         return `<div class="card-white p-8 rounded-3xl">
-            <p class="diag-loading">正在整理 ${stock.symbol} ${stock.name} 的完整診斷資料（財務／籌碼／技術面），請稍候...</p>
+            <p class="diag-loading">正在整理 ${stock.symbol} ${stock.name} 的完整診斷資料（財務／技術面），請稍候...</p>
         </div>`;
     }
 
@@ -7135,63 +6952,33 @@
         if (currentSymbol !== symbol) return;
 
         const tech = computeTechnicalSnapshot(priceRows, stock.price);
-        const todayVolume = getLatestVolumeFromRows(priceRows);
+        const fin = etf ? { available: false, isEtf: true } : buildFinancialSnapshot(
+            revMap ? revMap[symbol] : null,
+            incMap ? incMap[symbol] : null,
+            balMap ? balMap[symbol] : null
+        );
 
-        let fin;
-        if (etf) {
-            fin = { available: false, isEtf: true };
-        } else {
-            const allFetchFailed = (revMap === null && incMap === null && balMap === null);
-            if (allFetchFailed) {
-                fin = { available: false, fetchFailed: true };
-            } else {
-                fin = buildFinancialSnapshot(
-                    revMap ? revMap[symbol] : null,
-                    incMap ? incMap[symbol] : null,
-                    balMap ? balMap[symbol] : null
-                );
-                fin.fetchFailed = false;
-            }
-        }
-
-        // 財報暫時抓不到時（可能是公開資訊觀測站當下沒回應），安排有限次數的自動背景重試；
-        // 不會無限重試，也不會用板塊平均之類的假資料頂替
-        if (!etf && fin.fetchFailed) {
-            const retries = financialDiagnosticRetryCount[symbol] || 0;
-            if (retries < FINANCIAL_DIAGNOSTIC_MAX_RETRY) {
-                financialDiagnosticRetryCount[symbol] = retries + 1;
-                setTimeout(() => { if (currentSymbol === symbol) renderDiagnosticPanel(symbol); }, 4000 + retries * 3000);
-            }
-        } else {
-            financialDiagnosticRetryCount[symbol] = 0;
-        }
-
-        const structure = etf ? { available: false } : computeInstitutionalStructure(symbol, todayVolume);
-        const perf = etf ? computeEtfPricePerformance(tech) : null;
-
-        mounts.forEach((el, idx) => paintDiagnosticPanel(el, `diag${idx}`, stock, etf, tech, fin, structure, perf));
+        mounts.forEach((el, idx) => paintDiagnosticPanel(el, `diag${idx}`, stock, etf, tech, fin));
     }
 
-    function paintDiagnosticPanel(el, uid, stock, etf, tech, fin, structure, perf) {
+    function paintDiagnosticPanel(el, uid, stock, etf, tech, fin) {
         el.innerHTML = `
             <div class="space-y-6">
                 <div class="card-white glow-aqua p-8 rounded-3xl">
                     <div class="flex items-center justify-between flex-wrap gap-2 mb-1">
                         <h3 class="text-lg font-black text-gray-900">${stock.symbol} ${stock.name} // 完整診斷</h3>
-                        <div class="flex items-center gap-2 flex-wrap">
+                        <div class="flex items-center gap-2">
                             <span class="diag-badge">${classifyIndustry(stock.symbol)}</span>
                             <span class="diag-badge">${etf ? 'ETF / 指數型基金' : '個股'}</span>
                         </div>
                     </div>
                     <p class="text-[11px] text-gray-400">財務數據來源：公開資訊觀測站最新一期公告；技術指標依近期日收盤價自行計算，僅供參考，不是投資建議。</p>
                 </div>
-                ${renderFinancialModule(uid, fin, etf, perf)}
-                ${etf ? '' : renderInstitutionalModule(uid, structure)}
+                ${renderFinancialModule(uid, fin, etf)}
                 ${renderTechnicalModule(uid, tech)}
                 ${renderConclusionModule(stock, tech, fin, etf)}
             </div>`;
         renderFinancialChart(uid, fin, etf);
-        if (!etf) renderInstitutionalChart(uid, structure);
         renderTechnicalChart(uid, tech);
     }
 
@@ -7210,51 +6997,17 @@
         </div>`;
     }
 
-    function diagMoneyStatCard(label, thousandsValue) {
-        if (thousandsValue === null || thousandsValue === undefined || isNaN(thousandsValue)) {
-            return `<div class="diag-stat-card">
-                <p class="diag-stat-label">${label}</p>
-                <p class="diag-stat-value">-</p>
-                <p class="diag-stat-verdict">目前查不到這項資料。</p>
-            </div>`;
-        }
-        return `<div class="diag-stat-card">
-            <p class="diag-stat-label">${label}</p>
-            <p class="diag-stat-value">${fmtFinAmount(thousandsValue)}</p>
-        </div>`;
-    }
-
-    function renderFinancialModule(uid, fin, etf, perf) {
+    function renderFinancialModule(uid, fin, etf) {
         if (etf) {
-            if (!perf || !perf.available) {
-                return `<div class="card-white p-8 rounded-3xl">
-                    <p class="diag-module-title">FINANCIALS // ETF 淨值與追蹤表現</p>
-                    <div class="diag-etf-banner">這是一檔 ETF，交易資料還不夠計算近期表現，之後資料補齊後會自動出現。</div>
-                </div>`;
-            }
-            const chgCard = (label, v) => v === null
-                ? `<div class="diag-stat-card"><p class="diag-stat-label">${label}</p><p class="diag-stat-value">-</p><p class="diag-stat-verdict">資料不足</p></div>`
-                : `<div class="diag-stat-card"><p class="diag-stat-label">${label}</p><p class="diag-stat-value">${v >= 0 ? '+' : ''}${v.toFixed(2)}%</p><p class="diag-stat-verdict">${v >= 0 ? '這段期間市價走高' : '這段期間市價走低'}</p></div>`;
-            return `<div class="card-white p-8 rounded-3xl space-y-4">
-                <p class="diag-module-title">FINANCIALS // ETF 淨值與追蹤指數表現</p>
-                <p class="text-[11px] text-gray-400">這是一檔 ETF（指數型基金），本身不是一家公司，沒有「營收」「毛利率」這類財報數字可以看，這裡改用近期市價漲跌幅呈現追蹤表現，資料來源為證交所公開收盤價。</p>
-                <div class="diag-stat-grid">
-                    ${chgCard('近 5 日漲跌幅', perf.chg5d)}
-                    ${chgCard('近 20 日漲跌幅', perf.chg20d)}
-                    ${chgCard('近 60 日漲跌幅', perf.chg60d)}
-                </div>
-            </div>`;
-        }
-        if (fin && fin.fetchFailed) {
             return `<div class="card-white p-8 rounded-3xl">
                 <p class="diag-module-title">FINANCIALS // 財務診斷</p>
-                <div class="diag-etf-banner">正在從公開資訊觀測站同步真實財報...（網路回應較慢時會自動在背景重試，請稍候）</div>
+                <div class="diag-etf-banner">這是一檔 ETF（指數型基金），本身不是一家公司，沒有「營收」「毛利率」這類財報數字可以看，這裡的財務診斷模組不適用。想了解它的表現，建議直接參考上方的走勢圖與追蹤指數的表現。</div>
             </div>`;
         }
         if (!fin || !fin.available) {
             return `<div class="card-white p-8 rounded-3xl">
                 <p class="diag-module-title">FINANCIALS // 財務診斷</p>
-                <div class="diag-etf-banner">公開資訊觀測站目前查無這檔股票的財報資料（可能是金融、保險、控股等使用特殊報表格式的產業，本功能主要支援一般產業個股）。</div>
+                <div class="diag-etf-banner">目前抓不到這檔股票的財報資料（可能是公開資訊觀測站暫時無回應，或這是金融、保險等使用特殊財報格式的產業，本功能主要支援一般產業個股），晚點重新整理應該就會出現。</div>
             </div>`;
         }
 
@@ -7270,13 +7023,7 @@
                 ${diagStatCard('毛利率 GROSS MARGIN', fin.grossMarginPct, '%', v => v >= 30 ? '健康（產品或服務有一定的訂價能力）' : v >= 15 ? '普通（同業競爭可能比較激烈）' : '偏低（留意毛利被壓縮的原因）')}
                 ${diagStatCard('營業利益率 OPERATING MARGIN', fin.operatingMarginPct, '%', v => v >= 15 ? '健康（本業經營效率不錯）' : v >= 5 ? '普通（本業獲利空間有限）' : '偏低（本業賺錢能力較弱）')}
                 ${diagStatCard('負債比率 DEBT RATIO', fin.debtRatioPct, '%', v => v <= 50 ? '健康（借的錢在安全範圍內）' : v <= 70 ? '普通（負債偏高，留意還款壓力）' : '偏高（財務槓桿較重，波動風險較大）')}
-                ${diagStatCard('流動比率 CURRENT RATIO', fin.currentRatioPct, '%', v => v >= 150 ? '健康（短期償債能力充足）' : v >= 100 ? '普通（短期尚能應付，緩衝不算大）' : '偏低（短期資金調度需留意）')}
                 ${diagStatCard('EPS 每股盈餘', fin.eps, ' 元', v => v >= 1 ? '公司目前是賺錢的，數字越大代表每股賺越多' : v >= 0 ? '公司微幅獲利' : '公司目前是虧損狀態')}
-            </div>
-            <div class="diag-stat-grid mt-3">
-                ${diagMoneyStatCard('單季營收 QUARTERLY REVENUE', fin.curQuarterRevenue)}
-                ${diagMoneyStatCard('營業毛利 GROSS PROFIT', fin.grossProfit)}
-                ${diagMoneyStatCard('稅後淨利 NET INCOME', fin.netIncome)}
             </div>
             <div class="diag-stat-card mt-3">
                 <p class="diag-stat-label">自由現金流 FREE CASH FLOW [公司賺到的錢扣掉維持營運要花的錢，剩下能自由運用的現金]</p>
@@ -7286,7 +7033,7 @@
         return `<div class="card-white p-8 rounded-3xl space-y-4">
             <p class="diag-module-title">FINANCIALS // 近期財務動能與體質評估</p>
             <div>
-                <p class="text-xs text-gray-500 mb-2">單季營收與年增率（YoY）：代表這家公司最近賺錢的能力是越來越好還是衰退。${fin.revenueMonth ? `（資料年月：${fin.revenueMonth}）` : ''}</p>
+                <p class="text-xs text-gray-500 mb-2">近期營收比較：代表這家公司最近賺錢的能力是越來越好還是衰退。${fin.revenueMonth ? `（資料年月：${fin.revenueMonth}）` : ''}</p>
                 <div class="w-full h-48"><canvas id="chart-fin-${uid}"></canvas></div>
                 <p class="diag-note">${revenueNote}</p>
             </div>
@@ -7473,487 +7220,6 @@
         renderUI();
         refreshIndustryInBackground(newStock.symbol); // 背景向官方確認產業分類，抓到就無縫更新圓餅圖
         triggerGlobalRefresh(false);
-    }
-
-    /* ========================================================================
-       JSON / 文字批次快速匯入：完全不靠任何 AI／外部 API，使用者自己貼上（或請任何 AI
-       聊天工具幫忙轉換成）標準 JSON 陣列字串，前端直接 parse 後批次寫入 appData.stocks，
-       瞬間完成、也不會受限流或額度影響，是 OCR 截圖辨識暫時打不開時的可靠備援管道。
-       跟 OCR 匯入共用同一套「批次新增、不扣現金」語意，也共用同一個 parseOcrJsonList()
-       解析器（接受 code/symbol 兩種欄位名稱），只是資料來源改成使用者自己貼的文字。
-
-       畫面連動防呆：批次匯入／OCR 匯入這兩條路徑都全程包在 try/catch/finally 裡——就算
-       解析或寫入過程中有任何一步意外拋出例外，finally 也一定會呼叫 renderUI() 重新整個
-       畫面重繪一次（總覽卡片／圓餅圖／持股清單都在 renderUI() 內部，見下方 renderUI() 的
-       逐步 try/catch 拆解），確保「已匯入 N 筆」的訊息跟畫面上實際顯示的持股清單、總資產
-       數字永遠一致，不會出現「說已匯入但清單還是空的」這種訊息與畫面對不上的情況。
-    ======================================================================== */
-    function toggleJsonImportHelp() {
-        const help = document.getElementById('json-import-help');
-        if (help) help.classList.toggle('hidden');
-    }
-
-    function setJsonImportStatus(text, isError) {
-        const el = document.getElementById('json-import-status-note');
-        if (!el) return;
-        el.innerText = text;
-        el.className = isError ? 'text-xs font-bold' : 'text-xs text-gray-500';
-        if (isError) el.style.color = 'var(--c-accent)'; else el.style.color = '';
-    }
-
-    // [確認批次匯入]：讀取文字框內容 → 解析成 [{symbol, shares, cost}, ...] → 逐筆驗證後
-    // 直接批次寫入 appData.stocks（唯一的持股陣列，全站只有這一份，跟總覽卡片、圓餅圖、
-    // 持股清單讀的是同一個變數，不會有第二份「holdings」變數存在），並呼叫 persistHoldings()
-    // 同步寫回 Firestore 雲端。已經持有相同代號的直接跳過並提醒，不會自動加碼或覆蓋既有部位。
-    async function confirmImportJsonBatch() {
-        const textarea = document.getElementById('json-import-textarea');
-        const raw = textarea ? textarea.value.trim() : '';
-        if (!raw) {
-            setJsonImportStatus('請先貼上 JSON 陣列格式的資料，例如：[{"code":"0050","shares":50,"cost":76.4}]', true);
-            return;
-        }
-
-        const list = parseOcrJsonList(raw);
-        if (!list.length) {
-            setJsonImportStatus('沒有解析出有效資料，請確認格式是陣列，且每筆都有代號（code）、股數（shares）、成本（cost）三個欄位，數值都要大於 0。', true);
-            return;
-        }
-
-        // 防呆：appData.stocks 理論上永遠是陣列，但萬一遇到還沒初始化完成就搶先操作的極端情況，
-        // 這裡先補一個安全的空陣列，絕對不能讓後面的 .push() 直接因為 undefined 而整個中斷、
-        // 導致畫面卡在「已解析但沒寫入」的狀態
-        if (!Array.isArray(appData.stocks)) appData.stocks = [];
-
-        const toImport = [];
-        const skippedExisting = [];
-        list.forEach(item => {
-            if (appData.stocks.some(s => s.symbol === item.symbol) || toImport.some(s => s.symbol === item.symbol)) {
-                skippedExisting.push(item.symbol);
-                return;
-            }
-            toImport.push(item);
-        });
-
-        if (!toImport.length) {
-            setJsonImportStatus(`解析出 ${list.length} 筆資料，但全部都是已經持有的重複代號（${skippedExisting.join('、')}），沒有新增任何持股。`, true);
-            return;
-        }
-
-        const proceed = confirm(
-            `確定要批次匯入這 ${toImport.length} 筆持股嗎？\n\n` +
-            toImport.map(s => `${s.symbol}　${s.shares} 股　成本 ${s.cost}`).join('\n') +
-            `\n\n這只會新增持股紀錄，不會從現金扣款。`
-        );
-        if (!proceed) return;
-
-        // try/catch/finally：不管中間任何一步（寫入 appData、算報價、抓產業分類）有沒有意外
-        // 拋出例外，finally 都保證會執行 renderUI()，讓總覽卡片／圓餅圖／持股清單三個地方
-        // 一定會跟目前的 appData.stocks 保持同步，不會停在匯入前的舊畫面
-        try {
-            for (const item of toImport) {
-                const name = getCompanyName(item.symbol);
-                const eod = stockDayAllMap[item.symbol];
-                const price = eod && !isNaN(eod.close) ? eod.close : item.cost;
-                const newStock = {
-                    symbol: item.symbol, name, shares: item.shares, cost: item.cost, price,
-                    market_val: item.shares * price, priceSource: eod ? 'eod' : null,
-                    buyDate: todayISODate(), dividendHistory: []
-                };
-                appData.stocks.push(newStock);
-            }
-            persistHoldings(); // 批次寫入後立刻同步到 Firestore 雲端，重新整理／換裝置登入都看得到
-
-            if (textarea) textarea.value = '';
-            for (const item of toImport) {
-                refreshIndustryInBackground(item.symbol);
-            }
-            triggerGlobalRefresh(false);
-
-            let doneMsg = `已匯入 ${toImport.length} 筆持股並同步至雲端。`;
-            if (skippedExisting.length) doneMsg += `（略過已持有的重複代號：${skippedExisting.join('、')}）`;
-            setJsonImportStatus(doneMsg, false);
-        } catch (e) {
-            console.error('批次匯入過程發生錯誤，畫面仍會強制重新整理一次以反映目前實際資料', e);
-            setJsonImportStatus(`匯入過程中發生非預期錯誤：${e && e.message ? e.message : e}，請重新整理頁面確認持股清單是否正確，若有問題可以再匯入一次。`, true);
-        } finally {
-            renderUI(); // 保證：不管上面成功或中途出錯，這裡一定會用目前最新的 appData 重繪整個畫面
-        }
-    }
-
-    /* ========================================================================
-       截圖 OCR 智慧辨識匯入（雲端 AI 視覺辨識版）：上傳／貼上券商庫存截圖，直接送給
-       OpenRouter 上支援看圖的視覺模型（google/gemini-2.5-flash，備援 google/gemini-flash-1.5），
-       請它把表格裡每一列的「股票代號／股數／成本」抓出來、回傳嚴格 JSON 陣列，前端解析成
-       可編輯的確認清單，使用者核對無誤後一鍵批次匯入 appData.stocks（純粹回填既有持股，
-       不扣現金——這些部位通常是使用者在開始用這個 App 之前就已經買進的，跟 addStockItem()
-       「今天買入、自動扣款」的語意不同）。
-
-       金鑰共用：跟「02 頁」AI 白話分析共用同一把 OpenRouter 金鑰（getOpenRouterApiKey()），
-       使用者只要在 [ 系統與 API 設定 ] 填過一次金鑰，OCR 匯入跟每日分析都能直接用。
-
-       全面容錯設計：整條路徑（選檔 → 讀檔 → 呼叫 API → 解析回應）每一段都個別包在自己的
-       try/catch 裡，任何一段失敗都只會顯示「辨識連線失敗，請檢查網路或改用上方的『JSON
-       快速匯入』」這種友善提示，絕對不會讓瀏覽器跳出未捕捉的 TypeError 把整個流程卡死，
-       也保證「上傳截圖」按鈕不管成功或失敗，最後一定會恢復成可以再次點擊的狀態
-       （見 setOcrButtonLoading()，用 try/finally 保證一定會執行）。
-    ======================================================================== */
-    let ocrParsedResults = []; // 目前這一輪辨識出來、等待使用者確認匯入的候選清單
-
-    // 主要辨識模型 + 主模型出錯／被限流時的自動備援模型；兩個都是 OpenRouter 上穩定支援
-    // 圖片輸入（vision）的 Gemini 模型，用 models 陣列讓 OpenRouter 自動接手重試，
-    // 不用自己手動重打一次
-    const OCR_VISION_MODEL = 'google/gemini-2.5-flash';
-    const OCR_VISION_FALLBACK_MODELS = ['google/gemini-flash-1.5'];
-
-    // 統一的友善錯誤文案：不管背後真正的技術原因是什麼（網路被擋、逾時、API 回傳格式跑掉、
-    // 意外的 TypeError...），使用者看到的第一句話永遠是這個好懂的提示，技術細節則放在
-    // 括號裡供進階使用者或回報問題時參考，不會讓人一打開就看到嚇人的錯誤堆疊
-    function ocrFriendlyErrorText(technicalDetail) {
-        const base = '辨識連線失敗，請檢查網路或改用上方的「JSON 快速匯入」。';
-        return technicalDetail ? `${base}（技術細節：${technicalDetail}）` : base;
-    }
-
-    // 「上傳截圖」按鈕的讀取中狀態：辨識開始時鎖住按鈕避免使用者重複點擊，
-    // 不管最後辨識成功、失敗、還是中途發生非預期例外，都一定會透過 try/finally 呼叫這裡
-    // 把按鈕恢復成原本可以點擊的狀態，不會卡在「辨識中...」出不來。
-    function setOcrButtonLoading(isLoading) {
-        const btn = document.getElementById('ocr-upload-btn');
-        if (!btn) return;
-        if (isLoading) {
-            if (!btn.dataset.originalText) btn.dataset.originalText = btn.innerText;
-            btn.disabled = true;
-            btn.innerText = '辨識中...';
-            btn.classList.add('opacity-60', 'cursor-not-allowed');
-        } else {
-            btn.disabled = false;
-            btn.innerText = btn.dataset.originalText || '上傳截圖';
-            btn.classList.remove('opacity-60', 'cursor-not-allowed');
-        }
-    }
-
-    // 點擊「上傳截圖」選好檔案後觸發
-    function handleOcrImageSelect(input) {
-        try {
-            const file = input.files && input.files[0];
-            if (!file) return;
-            processOcrImageFile(file);
-        } catch (e) {
-            console.error('OCR 選擇檔案時發生非預期錯誤', e);
-            setOcrStatus(ocrFriendlyErrorText(e && e.message ? e.message : String(e)), true);
-            setOcrButtonLoading(false);
-        } finally {
-            if (input) input.value = ''; // 清空，允許使用者重複選同一張圖再試一次
-        }
-    }
-
-    // 全域貼上事件：只在目前顯示「持股管理與記憶庫」頁籤、且剪貼簿內容是圖片時才處理，
-    // 避免使用者在其他輸入框貼一般文字時被意外攔截
-    function handleOcrPasteEvent(event) {
-        try {
-            const manageTab = document.getElementById('tab-manage');
-            if (!manageTab || manageTab.classList.contains('hidden')) return;
-            const items = event.clipboardData && event.clipboardData.items;
-            if (!items) return;
-            for (const item of items) {
-                if (item.kind === 'file' && item.type && item.type.startsWith('image/')) {
-                    const file = item.getAsFile();
-                    if (file) {
-                        event.preventDefault();
-                        processOcrImageFile(file);
-                    }
-                    return;
-                }
-            }
-        } catch (e) {
-            console.error('OCR 貼上事件處理時發生非預期錯誤', e);
-        }
-    }
-    document.addEventListener('paste', handleOcrPasteEvent);
-
-    // 共用流程：讀檔 → 顯示預覽 → 呼叫雲端 AI 視覺辨識。FileReader 的 onload/onerror 是非同步
-    // callback，外層 try/catch 抓不到裡面拋出的例外，所以 callback 內部也要各自包一層，
-    // 確保不管在哪個環節出錯，都能顯示友善提示、並把按鈕恢復成可點擊狀態。
-    function processOcrImageFile(file) {
-        try {
-            const reader = new FileReader();
-            reader.onload = () => {
-                try {
-                    const dataUrl = reader.result;
-                    const previewWrap = document.getElementById('ocr-preview-wrap');
-                    const previewImg = document.getElementById('ocr-preview-img');
-                    if (previewImg) previewImg.src = dataUrl;
-                    if (previewWrap) previewWrap.classList.remove('hidden');
-                    runOcrRecognition(dataUrl); // 內部自己會在 finally 裡恢復按鈕狀態
-                } catch (e) {
-                    console.error('OCR 圖片預覽或觸發辨識時發生非預期錯誤', e);
-                    setOcrStatus(ocrFriendlyErrorText(e && e.message ? e.message : String(e)), true);
-                    setOcrButtonLoading(false);
-                }
-            };
-            reader.onerror = () => {
-                setOcrStatus('讀取圖片檔案失敗，請換一張圖片再試一次，或改用上方的「JSON 快速匯入」。', true);
-                setOcrButtonLoading(false);
-            };
-            setOcrButtonLoading(true);
-            reader.readAsDataURL(file);
-        } catch (e) {
-            console.error('OCR 讀取檔案時發生非預期錯誤', e);
-            setOcrStatus(ocrFriendlyErrorText(e && e.message ? e.message : String(e)), true);
-            setOcrButtonLoading(false);
-        }
-    }
-
-    function setOcrStatus(text, isError) {
-        const el = document.getElementById('ocr-status-note');
-        if (!el) return;
-        el.innerText = text;
-        el.className = isError ? 'text-xs font-bold' : 'text-xs text-gray-500';
-        if (isError) el.style.color = 'var(--c-accent)'; else el.style.color = '';
-    }
-
-    // 呼叫 OpenRouter 的視覺模型辨識截圖：優化過的 Prompt 明確告知這是台灣券商庫存明細截圖，
-    // 要求逐行對應出代號／股數／成本，並嚴格只回傳 JSON 陣列，不要夾雜任何說明文字或 Markdown。
-    // 整個函式用 try/catch/finally 包起來：catch 統一轉成友善提示，finally 保證按鈕一定恢復。
-    async function runOcrRecognition(dataUrl) {
-        const apiKey = getOpenRouterApiKey();
-        if (!apiKey) {
-            setOcrStatus('請先到「系統與 API 設定」填寫 OpenRouter API 金鑰（免費申請，不用綁信用卡），才能使用雲端 AI 截圖辨識，或改用上方的「JSON 快速匯入」。', true);
-            return;
-        }
-
-        ocrParsedResults = [];
-        renderOcrResults();
-        setOcrStatus('AI 辨識中，請稍候...', false);
-        setOcrButtonLoading(true);
-
-        const visionPrompt = '這是一張台灣券商的庫存明細截圖。請幫我把畫面中的每一行股票挑出來，精準對應出：\n' +
-            '- 股票代號（例如 00402A, 0050, 2449, 2618 等，台股代號通常是 4 到 6 碼數字，部分 ETF 級別會多一碼英文字母）\n' +
-            '- 持股股數（例如 1000, 50, 100 等數字，不要跟股價或市值搞混）\n' +
-            '- 成本均價（例如 9.9, 76.4, 223.3 等數字，是「買進成本」或「平均成本」欄位，不是現價／市價欄位）\n\n' +
-            '請畫面上看得到幾行股票，就回傳幾筆，不要遺漏，也不要憑空捏造畫面上沒有的資料。\n' +
-            '並必須嚴格回傳標準 JSON 格式陣列，格式如下，不要回傳其他多餘的文字、說明或 Markdown 符號（例如不要用```包起來）：\n' +
-            '[{"code": "0050", "shares": 50, "cost": 76.4}, {"code": "2618", "shares": 1000, "cost": 9.9}]';
-
-        try {
-            let res;
-            try {
-                res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${apiKey}`
-                    },
-                    body: JSON.stringify({
-                        model: OCR_VISION_MODEL,
-                        models: OCR_VISION_FALLBACK_MODELS, // 主模型失敗／被限流時，OpenRouter 自動改用這些模型重試
-                        max_tokens: 2000,
-                        messages: [
-                            {
-                                role: 'user',
-                                content: [
-                                    { type: 'text', text: visionPrompt },
-                                    { type: 'image_url', image_url: { url: dataUrl } }
-                                ]
-                            }
-                        ]
-                    })
-                });
-            } catch (networkErr) {
-                // fetch 本身拋出例外：通常是網路完全不通、DNS 失敗、或被瀏覽器擴充功能／防火牆直接擋下
-                console.error('AI 截圖辨識網路請求失敗', networkErr);
-                setOcrStatus(ocrFriendlyErrorText(networkErr && networkErr.message ? networkErr.message : String(networkErr)), true);
-                return;
-            }
-
-            if (!res.ok) {
-                let msg = '';
-                try {
-                    const errText = await res.text();
-                    try {
-                        const parsed = JSON.parse(errText);
-                        msg = (parsed && parsed.error && parsed.error.message) || errText;
-                    } catch (e) {
-                        msg = errText;
-                    }
-                } catch (e2) {
-                    msg = '';
-                }
-                const rateLimitHint = res.status === 429 ? '（這個模型當下被排隊的人太多，過一陣子再試一次）' : '';
-                setOcrStatus(ocrFriendlyErrorText(`HTTP ${res.status}${msg ? '：' + msg.slice(0, 150) : ''}${rateLimitHint}`), true);
-                return;
-            }
-
-            // 回應狀態碼是 200，但內容不一定保證是合法 JSON、或欄位齊全——這裡逐層防禦，
-            // 確保任何一層資料缺漏都只會顯示友善訊息，不會讓 data.choices[0].message.content
-            // 這種連續屬性存取因為中間某層是 undefined 而直接拋出 TypeError 把整個流程炸掉。
-            let data;
-            try {
-                data = await res.json();
-            } catch (parseErr) {
-                console.error('AI 截圖辨識回應不是有效的 JSON', parseErr);
-                setOcrStatus(ocrFriendlyErrorText('伺服器回傳的內容格式異常'), true);
-                return;
-            }
-
-            const text = data && typeof data === 'object' && data.choices && Array.isArray(data.choices) && data.choices[0]
-                && data.choices[0].message && typeof data.choices[0].message.content === 'string'
-                ? data.choices[0].message.content
-                : null;
-
-            if (!text || !text.trim()) {
-                setOcrStatus(ocrFriendlyErrorText('沒有收到有效的辨識結果內容'), true);
-                return;
-            }
-
-            const list = parseOcrJsonList(text);
-
-            if (!list.length) {
-                setOcrStatus('AI 沒有從這張截圖辨識出可用的持股資料，請確認截圖有清楚拍到代號／股數／成本欄位，或換一張再試一次，也可以改用上方「JSON / 文字批次快速匯入」。', true);
-                return;
-            }
-            ocrParsedResults = list;
-            renderOcrResults();
-            setOcrStatus(`辨識完成，找到 ${list.length} 筆持股。請逐筆核對修正後再匯入。`, false);
-        } catch (e) {
-            // 最後一道防線：任何上面沒有預期到的例外（含 TypeError），一律轉成同一套友善提示，
-            // 絕對不會讓使用者看到原始的 JS 錯誤訊息或整頁卡住沒有回應
-            console.error('AI 截圖辨識發生非預期例外', e);
-            setOcrStatus(ocrFriendlyErrorText(e && e.message ? e.message : String(e)), true);
-        } finally {
-            setOcrButtonLoading(false); // 不管成功、失敗、還是中途拋出例外，按鈕一定會恢復成可以再次點擊
-        }
-    }
-
-    // 把 AI 回傳的文字（或使用者自己貼的 JSON 文字）盡量解析成 [{symbol, shares, cost}, ...]：
-    // 優先嘗試直接 JSON.parse 整段文字，失敗的話（夾雜一點說明文字或```json```包裝）改用
-    // 正規表達式抓出最外層的 [...] 區塊再解析一次。每一筆都要有效的代號＋股數＋成本才會保留，
-    // 不完整的整筆捨棄。同時給 OCR 辨識結果與「JSON / 文字批次快速匯入」共用。
-    function parseOcrJsonList(text) {
-        if (!text) return [];
-        let raw = text.trim();
-
-        let parsed = null;
-        try {
-            parsed = JSON.parse(raw);
-        } catch (e) {
-            const match = raw.match(/\[[\s\S]*\]/);
-            if (match) {
-                try { parsed = JSON.parse(match[0]); } catch (e2) { parsed = null; }
-            }
-        }
-        if (!Array.isArray(parsed)) return [];
-
-        return parsed
-            .map(item => {
-                const symbol = String((item && (item.code || item.symbol)) || '').trim().toUpperCase();
-                const shares = Math.round(parseFloat(item && item.shares));
-                const cost = parseFloat(item && item.cost);
-                return { symbol, shares, cost };
-            })
-            .filter(item => item.symbol && /^\d{4,6}[A-Z]?$/.test(item.symbol) && Number.isFinite(item.shares) && item.shares > 0 && Number.isFinite(item.cost) && item.cost > 0);
-    }
-
-    // 把辨識結果畫成可編輯的確認清單（代號／股數／成本都可以直接修正），
-    // 每一列都有獨立的刪除按鈕，確認匯入時直接讀取這些輸入框當下的最新值
-    function renderOcrResults() {
-        const el = document.getElementById('ocr-result-list');
-        const importBtn = document.getElementById('ocr-import-btn');
-        if (!el) return;
-        if (!ocrParsedResults.length) {
-            el.innerHTML = '';
-            if (importBtn) importBtn.classList.add('hidden');
-            return;
-        }
-        el.innerHTML = ocrParsedResults.map((item, i) => `
-            <div class="flex items-center gap-2" data-ocr-row="${i}">
-                <input value="${escapeHtml(item.symbol)}" class="ocr-symbol-input bg-gray-50 border border-gray-200 p-2 rounded-lg text-xs text-gray-900 focus:outline-none focus:border-black" style="width:88px;" placeholder="代號">
-                <input type="number" value="${item.shares}" class="ocr-shares-input bg-gray-50 border border-gray-200 p-2 rounded-lg text-xs text-gray-900 focus:outline-none focus:border-black flex-1" placeholder="股數">
-                <input type="number" value="${item.cost}" class="ocr-cost-input bg-gray-50 border border-gray-200 p-2 rounded-lg text-xs text-gray-900 focus:outline-none focus:border-black flex-1" placeholder="成本">
-                <button type="button" onclick="removeOcrResultRow(${i})" class="text-gray-300 hover:text-red-500 font-black px-1" aria-label="移除這一列">×</button>
-            </div>`).join('');
-        if (importBtn) importBtn.classList.remove('hidden');
-    }
-
-    function removeOcrResultRow(i) {
-        ocrParsedResults.splice(i, 1);
-        renderOcrResults();
-    }
-
-    // [確認無誤，批次匯入這些持股]：讀取確認清單目前畫面上（使用者可能已手動修正過）的
-    // 代號／股數／成本，逐筆驗證後批次加進 appData.stocks；已經持有相同代號的直接跳過並提醒，
-    // 不會自動加碼或覆蓋既有部位。純粹回填既有持股，不動現金。全程包在 try/finally 裡，
-    // 理由跟 confirmImportJsonBatch() 一樣：保證不管有沒有例外都會強制 renderUI() 重繪畫面。
-    async function confirmImportOcrResults() {
-        const rows = document.querySelectorAll('#ocr-result-list [data-ocr-row]');
-        if (!rows.length) return;
-
-        const toImport = [];
-        const invalidRows = [];
-        const skippedExisting = [];
-        rows.forEach(row => {
-            const symbol = row.querySelector('.ocr-symbol-input').value.trim();
-            const shares = parseInt(row.querySelector('.ocr-shares-input').value, 10);
-            const cost = parseFloat(row.querySelector('.ocr-cost-input').value);
-            if (!symbol || !Number.isFinite(shares) || shares <= 0 || !Number.isFinite(cost) || cost <= 0) {
-                invalidRows.push(symbol || '(空白)');
-                return;
-            }
-            if (appData.stocks.some(s => s.symbol === symbol) || toImport.some(s => s.symbol === symbol)) {
-                skippedExisting.push(symbol);
-                return;
-            }
-            toImport.push({ symbol, shares, cost });
-        });
-
-        if (!toImport.length) {
-            alert('沒有可匯入的資料，請確認每一列都已填妥股票代號、股數與成本，且不是重複的持股。');
-            return;
-        }
-
-        const proceed = confirm(
-            `確定要批次匯入這 ${toImport.length} 筆持股嗎？\n\n` +
-            toImport.map(s => `${s.symbol}　${s.shares} 股　成本 ${s.cost}`).join('\n') +
-            `\n\n這只會新增持股紀錄，不會從現金扣款。`
-        );
-        if (!proceed) return;
-
-        if (!Array.isArray(appData.stocks)) appData.stocks = []; // 同樣的防呆：絕對不能讓 .push() 因為 undefined 而整段中斷
-
-        try {
-            for (const item of toImport) {
-                const name = getCompanyName(item.symbol);
-                const eod = stockDayAllMap[item.symbol];
-                const price = eod && !isNaN(eod.close) ? eod.close : item.cost;
-                const newStock = {
-                    symbol: item.symbol, name, shares: item.shares, cost: item.cost, price,
-                    market_val: item.shares * price, priceSource: eod ? 'eod' : null,
-                    buyDate: todayISODate(), dividendHistory: []
-                };
-                appData.stocks.push(newStock);
-            }
-            persistHoldings();
-
-            // 清空 OCR 面板，回到初始狀態，準備下一次辨識
-            ocrParsedResults = [];
-            renderOcrResults();
-            const previewWrap = document.getElementById('ocr-preview-wrap');
-            if (previewWrap) previewWrap.classList.add('hidden');
-
-            for (const item of toImport) {
-                refreshIndustryInBackground(item.symbol);
-            }
-            triggerGlobalRefresh(false);
-
-            let doneMsg = `已匯入 ${toImport.length} 筆持股。`;
-            if (skippedExisting.length) doneMsg += `（略過已持有的重複代號：${skippedExisting.join('、')}）`;
-            if (invalidRows.length) doneMsg += `（有 ${invalidRows.length} 列資料不完整，未匯入）`;
-            setOcrStatus(doneMsg, false);
-        } catch (e) {
-            console.error('OCR 批次匯入過程發生錯誤，畫面仍會強制重新整理一次以反映目前實際資料', e);
-            setOcrStatus(`匯入過程中發生非預期錯誤：${e && e.message ? e.message : e}，請重新整理頁面確認持股清單是否正確，若有問題可以再匯入一次。`, true);
-        } finally {
-            renderUI(); // 保證：不管上面成功或中途出錯，這裡一定會用目前最新的 appData 重繪整個畫面
-        }
     }
 
     /* ========================================================================
