@@ -1680,6 +1680,17 @@
                     <input id="openrouter-api-key" type="password" placeholder="貼上你的 OpenRouter API 金鑰（sk-or-...）" onchange="saveOpenRouterApiKey()" class="w-full bg-gray-50 border border-gray-200 p-3 rounded-xl text-sm text-gray-900 focus:outline-none focus:border-black font-mono">
                 </div>
                 <div class="space-y-2">
+                    <h4>AI 分析 // CGU LLM API（校內自架，選填，與 OpenRouter 完全獨立）</h4>
+                    <p>兩邊金鑰是不同服務、不能互通：這裡填的是 CGU LLM Gateway 核發給你的金鑰。兩邊都有填的話，AI 分析與截圖辨識會先試 OpenRouter，失敗或沒填才改試 CGU；兩邊都沒填才會退回規則式的白話摘要。每個帳號能用的模型不一樣，填完金鑰後按下方按鈕抓真實可用清單，不要憑空猜模型名稱。</p>
+                    <input id="cgu-api-key" type="password" placeholder="貼上你的 CGU API Key" onchange="saveCguApiKey()" class="w-full bg-gray-50 border border-gray-200 p-3 rounded-xl text-sm text-gray-900 focus:outline-none focus:border-black font-mono">
+                    <div class="flex gap-2">
+                        <input id="cgu-model" list="cgu-model-list" type="text" placeholder="模型名稱（先按右邊按鈕抓清單）" onchange="saveCguModel()" class="flex-1 bg-gray-50 border border-gray-200 p-3 rounded-xl text-sm text-gray-900 focus:outline-none focus:border-black font-mono">
+                        <datalist id="cgu-model-list"></datalist>
+                        <button type="button" onclick="fetchCguModelList()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold px-4 rounded-xl transition whitespace-nowrap">抓取可用模型清單</button>
+                    </div>
+                    <p id="cgu-model-note" class="text-[11px] text-gray-400"></p>
+                </div>
+                <div class="space-y-2">
                     <h4>交易成本 // 手續費折數與低現金警戒線</h4>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <div class="space-y-1">
@@ -1782,6 +1793,13 @@
     let openRouterApiKeyCache = '';   // 對應原本的 tw_openrouter_api_key，現在存在 Firestore，登入後在記憶體裡快取一份供同步讀取
     let summaryHistoryCache = [];     // 對應原本的 tw_summary_history，同樣改存 Firestore + 記憶體快取
     let disclaimerAgreed = false;     // 這個帳號是否已經同意過隱私聲明與免責條款（讀自 Firestore settings 文件）
+    // CGU LLM Gateway（校內自架、OpenAI 相容格式）：跟 OpenRouter 是兩個完全獨立的服務，
+    // 各自的金鑰不能互通。CGU_BASE_URL 是固定端點，不需要使用者自己填；每個帳號能用的模型不同，
+    // 所以模型名稱要使用者自己填（或按下面「抓取可用模型清單」按鈕從 /v1/models 抓真實清單），
+    // 絕不憑空猜一個預設模型名稱，避免打到帳號根本沒有權限用的模型。
+    const CGU_BASE_URL = 'https://air.cgu.edu.tw/cgullmapi/v1';
+    let cguApiKeyCache = '';
+    let cguModelCache = '';
 
     function initFirebase() {
         if (!FIREBASE_CONFIGURED) {
@@ -1992,11 +2010,17 @@
         emailJsConfig = { serviceId: '', templateId: '', publicKey: '' };
         summaryHistoryCache = [];
         openRouterApiKeyCache = '';
+        cguApiKeyCache = '';
+        cguModelCache = '';
         disclaimerAgreed = false;
         feeDiscount = 1;
         cashAlertThreshold = 0;
         const keyInput = document.getElementById('openrouter-api-key');
         if (keyInput) keyInput.value = '';
+        const cguKeyInput = document.getElementById('cgu-api-key');
+        if (cguKeyInput) cguKeyInput.value = '';
+        const cguModelInput = document.getElementById('cgu-model');
+        if (cguModelInput) cguModelInput.value = '';
         // 登出時清空 localStorage：公開市場資料快取（公司名冊等）、上一位使用者可能殘留的任何
         // 暫存痕跡都要清乾淨，確保共用裝置換帳號登入不會外洩上一位使用者的資料。
         // 但「valo_disclaimer_agreed_<uid>」這組帳號綁定的免責聲明同意紀錄要刻意保留下來——
@@ -2375,6 +2399,13 @@
         const keyInput = document.getElementById('openrouter-api-key');
         if (keyInput) keyInput.value = openRouterApiKeyCache;
 
+        if (settingsData && settingsData.cguApiKey) cguApiKeyCache = settingsData.cguApiKey;
+        if (settingsData && settingsData.cguModel) cguModelCache = settingsData.cguModel;
+        const cguKeyInput = document.getElementById('cgu-api-key');
+        if (cguKeyInput) cguKeyInput.value = cguApiKeyCache;
+        const cguModelInput = document.getElementById('cgu-model');
+        if (cguModelInput) cguModelInput.value = cguModelCache;
+
         if (settingsData && settingsData.emailJsConfig && typeof settingsData.emailJsConfig === 'object') {
             emailJsConfig = Object.assign({ serviceId: '', templateId: '', publicKey: '' }, settingsData.emailJsConfig);
         }
@@ -2427,9 +2458,51 @@
         if (!currentUser || !fbDb) return;
         reportFirestoreWrite(userDocRef('settings').set({
             openRouterApiKey: openRouterApiKeyCache,
+            cguApiKey: cguApiKeyCache,
+            cguModel: cguModelCache,
             emailJsConfig,
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         }, { merge: true }), '個人設定');
+    }
+
+    function saveCguApiKey() {
+        const val = document.getElementById('cgu-api-key').value.trim();
+        cguApiKeyCache = val;
+        persistSettings();
+    }
+
+    function saveCguModel() {
+        const val = document.getElementById('cgu-model').value.trim();
+        cguModelCache = val;
+        persistSettings();
+    }
+
+    // 用使用者填的 CGU Key 呼叫 GET /v1/models，把這個帳號真的有權限用的模型列出來給使用者選，
+    // 不憑空猜一個預設模型名稱（帳號可用模型因人而異，猜錯會直接打到沒有權限的模型而失敗）
+    async function fetchCguModelList() {
+        const noteEl = document.getElementById('cgu-model-note');
+        const key = document.getElementById('cgu-api-key').value.trim();
+        if (!key) { if (noteEl) noteEl.innerText = '請先貼上 CGU API Key，再抓取這個帳號可用的模型清單。'; return; }
+        if (noteEl) noteEl.innerText = '抓取中...';
+        try {
+            const res = await fetch(`${CGU_BASE_URL}/models`, { headers: { 'Authorization': `Bearer ${key}` } });
+            if (!res.ok) {
+                if (noteEl) noteEl.innerText = `抓取失敗（HTTP ${res.status}），請確認 CGU API Key 是否正確、或詢問系統管理員帳號權限。`;
+                return;
+            }
+            const data = await res.json();
+            const ids = (data && Array.isArray(data.data)) ? data.data.map(m => m && m.id).filter(Boolean) : [];
+            const dl = document.getElementById('cgu-model-list');
+            if (!ids.length) {
+                if (noteEl) noteEl.innerText = '這個帳號目前查不到任何可用模型，請確認帳號權限。';
+                if (dl) dl.innerHTML = '';
+                return;
+            }
+            if (dl) dl.innerHTML = ids.map(id => `<option value="${escapeHtml(id)}"></option>`).join('');
+            if (noteEl) noteEl.innerText = `找到 ${ids.length} 個這個帳號可用的模型，已經填進下方「模型名稱」欄位的建議清單，直接點選或輸入其中一個即可（建議選有支援圖片輸入的模型，截圖辨識才能用）。`;
+        } catch (e) {
+            if (noteEl) noteEl.innerText = `抓取失敗：${e && e.message ? e.message : String(e)}`;
+        }
     }
 
     function persistMemory() {
@@ -7975,17 +8048,8 @@
     // 要求逐行對應出代號／股數／成本，並嚴格只回傳 JSON 陣列，不要夾雜任何說明文字或 Markdown。
     // 整個函式用 try/catch/finally 包起來：catch 統一轉成友善提示，finally 保證按鈕一定恢復。
     async function runOcrRecognition(dataUrl) {
-        const apiKey = getOpenRouterApiKey();
-        if (!apiKey) {
-            setOcrStatus('請先到「系統與 API 設定」填寫 OpenRouter API 金鑰（免費申請，不用綁信用卡），才能使用雲端 AI 截圖辨識，或改用上方的「JSON 快速匯入」。', true);
-            return;
-        }
-
-        ocrParsedResults = [];
-        renderOcrResults();
-        setOcrStatus('AI 辨識中，請稍候...', false);
-        setOcrButtonLoading(true);
-
+        const openRouterKey = getOpenRouterApiKey();
+        const cgu = getCguConfig();
         const visionPrompt = '這是一張台灣券商的庫存明細截圖。請幫我把畫面中的每一行股票挑出來，精準對應出：\n' +
             '- 股票代號（例如 00402A, 0050, 2449, 2618 等，台股代號通常是 4 到 6 碼數字，部分 ETF 級別會多一碼英文字母）\n' +
             '- 持股股數（例如 1000, 50, 100 等數字，不要跟股價或市值搞混）\n' +
@@ -7993,79 +8057,58 @@
             '請畫面上看得到幾行股票，就回傳幾筆，不要遺漏，也不要憑空捏造畫面上沒有的資料。\n' +
             '並必須嚴格回傳標準 JSON 格式陣列，格式如下，不要回傳其他多餘的文字、說明或 Markdown 符號（例如不要用```包起來）：\n' +
             '[{"code": "0050", "shares": 50, "cost": 76.4}, {"code": "2618", "shares": 1000, "cost": 9.9}]';
+        const visionMessages = [{
+            role: 'user',
+            content: [
+                { type: 'text', text: visionPrompt },
+                { type: 'image_url', image_url: { url: dataUrl } }
+            ]
+        }];
+
+        // 先組出這次要嘗試的服務清單：OpenRouter 有填金鑰就排第一順位，CGU 有填金鑰＋模型名稱
+        // 就排第二順位（CGU 沒有 OpenRouter 那種「主模型不行自動換模型」的 models 陣列語法，
+        // 所以只用使用者指定的單一模型）
+        const attempts = [];
+        if (openRouterKey) {
+            attempts.push({
+                providerLabel: 'OpenRouter',
+                url: 'https://openrouter.ai/api/v1/chat/completions',
+                apiKey: openRouterKey,
+                body: { model: OCR_VISION_MODEL, models: OCR_VISION_FALLBACK_MODELS, max_tokens: 2000, messages: visionMessages }
+            });
+        }
+        if (cgu.apiKey && cgu.model) {
+            attempts.push({
+                providerLabel: 'CGU LLM API',
+                url: `${CGU_BASE_URL}/chat/completions`,
+                apiKey: cgu.apiKey,
+                body: { model: cgu.model, max_tokens: 2000, messages: visionMessages }
+            });
+        }
+
+        if (!attempts.length) {
+            setOcrStatus('請先到「系統與 API 設定」填寫 OpenRouter 或 CGU LLM API 的金鑰（任一個即可），才能使用雲端 AI 截圖辨識，或改用上方的「JSON 快速匯入」。', true);
+            return;
+        }
+
+        ocrParsedResults = [];
+        renderOcrResults();
+        setOcrStatus(attempts.length > 1 ? 'AI 辨識中，請稍候...（會先試 OpenRouter，失敗才改試 CGU）' : 'AI 辨識中，請稍候...', false);
+        setOcrButtonLoading(true);
 
         try {
-            let res;
-            try {
-                res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${apiKey}`
-                    },
-                    body: JSON.stringify({
-                        model: OCR_VISION_MODEL,
-                        models: OCR_VISION_FALLBACK_MODELS, // 主模型失敗／被限流時，OpenRouter 自動改用這些模型重試
-                        max_tokens: 2000,
-                        messages: [
-                            {
-                                role: 'user',
-                                content: [
-                                    { type: 'text', text: visionPrompt },
-                                    { type: 'image_url', image_url: { url: dataUrl } }
-                                ]
-                            }
-                        ]
-                    })
-                });
-            } catch (networkErr) {
-                // fetch 本身拋出例外：通常是網路完全不通、DNS 失敗、或被瀏覽器擴充功能／防火牆直接擋下
-                console.error('AI 截圖辨識網路請求失敗', networkErr);
-                setOcrStatus(ocrFriendlyErrorText(networkErr && networkErr.message ? networkErr.message : String(networkErr)), true);
+            const result = await tryAiProviders(attempts);
+
+            if (result.error) {
+                const err = result.error;
+                const rateLimitHint = err.status === 429 ? '（這個模型當下被排隊的人太多，過一陣子再試一次）' : '';
+                const providerPrefix = err.provider ? `[${err.provider}] ` : '';
+                const detail = err.status ? `HTTP ${err.status}${err.message ? '：' + String(err.message).slice(0, 150) : ''}${rateLimitHint}` : (err.message || '未知錯誤');
+                setOcrStatus(ocrFriendlyErrorText(`${providerPrefix}${detail}`), true);
                 return;
             }
 
-            if (!res.ok) {
-                let msg = '';
-                try {
-                    const errText = await res.text();
-                    try {
-                        const parsed = JSON.parse(errText);
-                        msg = (parsed && parsed.error && parsed.error.message) || errText;
-                    } catch (e) {
-                        msg = errText;
-                    }
-                } catch (e2) {
-                    msg = '';
-                }
-                const rateLimitHint = res.status === 429 ? '（這個模型當下被排隊的人太多，過一陣子再試一次）' : '';
-                setOcrStatus(ocrFriendlyErrorText(`HTTP ${res.status}${msg ? '：' + msg.slice(0, 150) : ''}${rateLimitHint}`), true);
-                return;
-            }
-
-            // 回應狀態碼是 200，但內容不一定保證是合法 JSON、或欄位齊全——這裡逐層防禦，
-            // 確保任何一層資料缺漏都只會顯示友善訊息，不會讓 data.choices[0].message.content
-            // 這種連續屬性存取因為中間某層是 undefined 而直接拋出 TypeError 把整個流程炸掉。
-            let data;
-            try {
-                data = await res.json();
-            } catch (parseErr) {
-                console.error('AI 截圖辨識回應不是有效的 JSON', parseErr);
-                setOcrStatus(ocrFriendlyErrorText('伺服器回傳的內容格式異常'), true);
-                return;
-            }
-
-            const text = data && typeof data === 'object' && data.choices && Array.isArray(data.choices) && data.choices[0]
-                && data.choices[0].message && typeof data.choices[0].message.content === 'string'
-                ? data.choices[0].message.content
-                : null;
-
-            if (!text || !text.trim()) {
-                setOcrStatus(ocrFriendlyErrorText('沒有收到有效的辨識結果內容'), true);
-                return;
-            }
-
-            const list = parseOcrJsonList(text);
+            const list = parseOcrJsonList(result.text);
 
             if (!list.length) {
                 setOcrStatus('AI 沒有從這張截圖辨識出可用的持股資料，請確認截圖有清楚拍到代號／股數／成本欄位，或換一張再試一次，也可以改用上方「JSON / 文字批次快速匯入」。', true);
@@ -8073,7 +8116,7 @@
             }
             ocrParsedResults = list;
             renderOcrResults();
-            setOcrStatus(`辨識完成，找到 ${list.length} 筆持股。請逐筆核對修正後再匯入。`, false);
+            setOcrStatus(`辨識完成（由 ${result.providerUsed} 回覆），找到 ${list.length} 筆持股。請逐筆核對修正後再匯入。`, false);
         } catch (e) {
             // 最後一道防線：任何上面沒有預期到的例外（含 TypeError），一律轉成同一套友善提示，
             // 絕對不會讓使用者看到原始的 JS 錯誤訊息或整頁卡住沒有回應
@@ -8320,6 +8363,56 @@
         persistSettings();
     }
 
+    function getCguConfig() {
+        return { apiKey: (cguApiKeyCache || '').trim(), model: (cguModelCache || '').trim() };
+    }
+
+    // 依序嘗試多個「AI 供應商呼叫設定」（例如先 OpenRouter、失敗再換 CGU LLM API），直到有一個
+    // 成功回傳文字內容為止；全部都沒設定或全部都失敗的話，回傳彙整過的錯誤說明。這樣 OCR 截圖辨識
+    // 與每日 AI 分析都可以各自組出自己需要的 body（不同模型、不同 OpenRouter 專屬欄位等），
+    // 又能共用同一套「先試 A、A 不行換 B」的重試與錯誤處理邏輯，不用寫兩份幾乎一樣的 fetch 流程。
+    // attempts 每一項格式：{ providerLabel, url, apiKey, body }
+    async function tryAiProviders(attempts) {
+        if (!attempts.length) return { error: { message: '尚未設定任何 AI 服務（OpenRouter 或 CGU LLM API 金鑰皆未填寫）' } };
+        let lastError = null;
+        for (const attempt of attempts) {
+            try {
+                const res = await fetch(attempt.url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${attempt.apiKey}` },
+                    body: JSON.stringify(attempt.body)
+                });
+                if (!res.ok) {
+                    const errText = await res.text().catch(() => '');
+                    let msg = errText;
+                    try {
+                        const parsed = JSON.parse(errText);
+                        msg = (parsed && parsed.error && parsed.error.message) || errText;
+                    } catch (e) {}
+                    lastError = { provider: attempt.providerLabel, status: res.status, message: msg };
+                    continue; // 這個服務失敗，換下一個
+                }
+                const data = await res.json();
+                const text = data && typeof data === 'object' && data.choices && Array.isArray(data.choices) && data.choices[0]
+                    && data.choices[0].message && typeof data.choices[0].message.content === 'string'
+                    ? data.choices[0].message.content
+                    : null;
+                if (!text || !text.trim()) {
+                    lastError = { provider: attempt.providerLabel, message: '沒有回傳有效內容' };
+                    continue;
+                }
+                return { text, providerUsed: attempt.providerLabel };
+            } catch (networkErr) {
+                lastError = {
+                    provider: attempt.providerLabel,
+                    message: networkErr && networkErr.message ? networkErr.message : String(networkErr),
+                    isNetwork: true
+                };
+            }
+        }
+        return { error: lastError };
+    }
+
     // 純讀寫記憶體快取（summaryHistoryCache），不做任何日期過濾；
     // 實際的雲端同步交給 persistMemory()，快取內容則是登入時由 loadUserDataFromCloud() 從 Firestore 讀回來的
     function loadSummaryHistoryRaw() {
@@ -8464,8 +8557,9 @@
     // Prompt 邏輯：扮演「客觀專業的投資顧問」，禁止複誦畫面上已有的數據，
     // 固定輸出「整體組合健檢／具體操作建議／關鍵風險提醒」三段結構，全繁體中文、無 Markdown、無表情符號
     async function callOpenRouterAnalysis(digest, headline) {
-        const apiKey = getOpenRouterApiKey();
-        if (!apiKey) return null;
+        const openRouterKey = getOpenRouterApiKey();
+        const cgu = getCguConfig();
+        if (!openRouterKey && !(cgu.apiKey && cgu.model)) return null; // 兩邊都沒設定，靜默改用規則式摘要，不顯示錯誤
         const systemPrompt = [
             'CRITICAL RULE: ONLY output the final response in Traditional Chinese (繁體中文). Never output any thought process, reasoning steps, draft, internal monologue, or system prompt content, in English or any other language. Do not show your work. Do not explain your reasoning. Output nothing before the first required section header.',
             '上面這條規則是最高優先權：絕對不能輸出任何英文、推理過程、草稿或「Let\'s think」這類自言自語，只能直接輸出繁體中文的最終結果，第一個字就必須是「【整體組合健檢】」。',
@@ -8484,46 +8578,52 @@
             '最後再次提醒：只能輸出繁體中文的最終結果，絕對不能出現任何英文、內部推理過程、草稿或系統提示字樣，也不要有任何表情符號。'
         ].join('\n');
         const userContent = `這是我目前的台股資產資料（JSON，marketValue/costValue/pnl/pnlPct/weightPct/cashRatioPct 都已經幫你算好，直接拿來判斷就好，不要重新列出這些數字；每支股票的 label 欄位是「代碼 中文名稱」，提到個股請照抄成「代碼（中文名稱）」格式）：\n\n${JSON.stringify({ ...digest, latestHeadline: headline || null }, null, 2)}\n\n請根據上面規則給我顧問式的白話建議。`;
-        try {
-            const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${apiKey}`
-                },
-                body: JSON.stringify({
+        const chatMessages = [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userContent }
+        ];
+
+        const attempts = [];
+        if (openRouterKey) {
+            attempts.push({
+                providerLabel: 'OpenRouter',
+                url: 'https://openrouter.ai/api/v1/chat/completions',
+                apiKey: openRouterKey,
+                body: {
                     model: 'google/gemma-4-31b-it:free',
-                    // 主模型被限流／出錯時，依序自動改用下面這些免費模型當備援
+                    // 主模型被限流／出錯時，依序自動改用下面這些免費模型當備援（CGU 沒有這個機制，
+                    // 只用使用者指定的單一模型，所以這個欄位只放在 OpenRouter 這一次嘗試裡）
                     models: ['nvidia/nemotron-3-super-120b-a12b:free', 'openrouter/free'],
                     max_tokens: 1200,
                     reasoning: { exclude: true },
-                    messages: [
-                        { role: 'system', content: systemPrompt },
-                        { role: 'user', content: userContent }
-                    ]
-                })
+                    messages: chatMessages
+                }
             });
-            if (!res.ok) {
-                const errText = await res.text().catch(() => '');
-                let msg = errText;
-                try {
-                    const parsed = JSON.parse(errText);
-                    msg = (parsed && parsed.error && parsed.error.message) || errText;
-                } catch (e) {}
-                const rateLimitHint = res.status === 429 ? '（免費模型當下被排隊的人太多，過一陣子再按「立即產生」試試看）' : '';
-                return { error: `OpenRouter API 回應失敗（HTTP ${res.status}）${msg ? '：' + msg.slice(0, 200) : ''}${rateLimitHint}` };
-            }
-            const data = await res.json();
-            const text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-            if (text && !looksLikeCleanAnalysis(text)) {
-                return { error: '免費模型這次回傳的格式異常（夾雜大量英文或跑版，可能是模型把內部推理過程也印出來了）。' };
-            }
-            return { text: text || null };
-        } catch (e) {
-            const raw = e && e.message ? e.message : String(e);
-            const hint = '（瀏覽器連線被擋下，常見原因：這個網頁是用 file:// 直接打開的、或裝置沒有網路、或有廣告攔截／隱私外掛擋住了 openrouter.ai，可以試試看用 Safari／Chrome 直接打開網址而不是雙擊檔案，或先關掉攔截外掛再試一次）';
-            return { error: `AI 分析呼叫失敗：${raw}\n${hint}` };
         }
+        if (cgu.apiKey && cgu.model) {
+            attempts.push({
+                providerLabel: 'CGU LLM API',
+                url: `${CGU_BASE_URL}/chat/completions`,
+                apiKey: cgu.apiKey,
+                body: { model: cgu.model, max_tokens: 1200, messages: chatMessages }
+            });
+        }
+
+        const result = await tryAiProviders(attempts);
+        if (result.error) {
+            const err = result.error;
+            const rateLimitHint = err.status === 429 ? '（免費模型當下被排隊的人太多，過一陣子再按「立即產生」試試看）' : '';
+            const providerLabel = err.provider || 'AI 服務';
+            if (err.isNetwork) {
+                const hint = '（瀏覽器連線被擋下，常見原因：這個網頁是用 file:// 直接打開的、或裝置沒有網路、或有廣告攔截／隱私外掛擋住了對外連線，可以試試看用 Safari／Chrome 直接打開網址而不是雙擊檔案，或先關掉攔截外掛再試一次）';
+                return { error: `AI 分析呼叫失敗（${providerLabel}）：${err.message}\n${hint}` };
+            }
+            return { error: `${providerLabel} 回應失敗${err.status ? `（HTTP ${err.status}）` : ''}${err.message ? '：' + String(err.message).slice(0, 200) : ''}${rateLimitHint}` };
+        }
+        if (result.text && !looksLikeCleanAnalysis(result.text)) {
+            return { error: `${result.providerUsed} 這次回傳的格式異常（夾雜大量英文或跑版，可能是模型把內部推理過程也印出來了）。` };
+        }
+        return { text: result.text || null };
     }
 
     // 簡單檢查 AI 回覆是否「像樣」：要有條列符號（- 或 ・），且不能夾雜大量英文
